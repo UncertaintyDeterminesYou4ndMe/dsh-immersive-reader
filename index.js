@@ -1,0 +1,50 @@
+/**
+ * dsh-immersive-reader · 宿主半入口。
+ *
+ * 做三件事：
+ *   1. 书库目录（默认 $DSH_HOME/immersive-reader）+ 翻译引擎；
+ *   2. 注册 HTTP 路由 /api/immersive-reader/**（浏览器半用）；
+ *   3. tools 服务就绪后注册 reader_* 工具（agent 用），拿不到就跳过。
+ *
+ * inject 只硬依赖 webServer 与 llm：没有 webServer 的 profile（headless）不会装这个插件。
+ */
+import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { LibraryStore } from './lib/store.js'
+import { Translator } from './lib/translate.js'
+import { registerRoutes, parseByFilename } from './lib/routes.js'
+import { registerTools } from './lib/tools.js'
+
+export const name = 'dsh-immersive-reader'
+export const inject = ['webServer', 'llm']
+
+function resolveLibraryDir(config) {
+  if (config && typeof config.libraryDir === 'string' && config.libraryDir.trim()) return config.libraryDir
+  const home = process.env.DSH_HOME && process.env.DSH_HOME.trim() ? process.env.DSH_HOME.trim() : join(homedir(), '.dsh')
+  return join(home, 'immersive-reader')
+}
+
+export function apply(ctx, config = {}) {
+  const logger = ctx.logger ?? console
+  const store = new LibraryStore(resolveLibraryDir(config))
+  const translator = new Translator({ ctx, store, logger })
+
+  ctx.effect(() => {
+    let disposeRoutes = () => {}
+    store.init()
+      .then(() => {
+        disposeRoutes = registerRoutes(ctx, { store, translator, logger })
+        logger.info?.(`[immersive-reader] 书库：${store.root}`)
+      })
+      .catch(error => logger.warn(`[immersive-reader] 初始化失败：${error?.stack ?? error}`))
+    return () => {
+      translator.dispose()
+      disposeRoutes()
+    }
+  })
+
+  ctx.inject(['tools'], (scoped) => {
+    registerTools(scoped, { store, translator, parseByFilename }, logger)
+      .catch(error => logger.warn(`[immersive-reader] 注册工具失败：${error?.message ?? error}`))
+  })
+}

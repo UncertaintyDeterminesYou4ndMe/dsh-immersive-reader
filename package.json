@@ -1,0 +1,29 @@
+{
+  "name": "dsh-immersive-reader",
+  "version": "0.1.0",
+  "description": "译读：在 DeepSeek Harness 里用母语读原版书。导入 EPUB/TXT/Markdown，按章节由 LLM 精译（保留论证、语气与历史背景，附译注），点一下看原文。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "client.js", "lib", "locale", "cordis.patch.yml", "icon.svg", "README.md", "LICENSE"],
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-slots"] },
+    "compatibility": { "dsh": ">=0.2.0-rc.1 <0.3.0-0" }
+  },
+  "engines": { "node": ">=24.9.0", "dsh": ">=0.2.0-rc.1 <0.3.0-0" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test"
+  },
+  "dependencies": { "fflate": "^0.8.2" },
+  "keywords": ["dsh", "dsh-plugin", "epub", "reader", "translation", "bilingual"],
+  "license": "MIT"
+}

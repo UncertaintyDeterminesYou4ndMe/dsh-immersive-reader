@@ -448,43 +448,136 @@ function Footnote({ bookId, note }) {
 }
 
 /** 把译文按已划线的片段切开渲染；片段按首次出现位置匹配。 */
-function Highlighted({ text, ranges, onRemove }) {
-  if (!ranges || ranges.length === 0) return text
+/** 把追问按「选中的文字能否在 text 里找到」分成锚点组与段尾组 */
+function splitAsks(text, asks) {
+  const groups = new Map()
+  const rest = []
+  for (const a of asks ?? []) {
+    if (text && a.selection && text.includes(a.selection)) {
+      if (!groups.has(a.selection)) groups.set(a.selection, [])
+      groups.get(a.selection).push(a)
+    } else rest.push(a)
+  }
+  return { groups, rest }
+}
+
+/** 正文里的标注：划线片段与追问锚点（虚下划线，悬停或点击浮出答案） */
+function Annotated({ text, ranges, onRemove, groups, ctl }) {
   const cuts = []
-  for (const r of ranges) {
+  for (const [sel, list] of groups ?? []) {
+    const at = text.indexOf(sel)
+    if (at >= 0) cuts.push({ start: at, end: at + sel.length, ids: list.map(a => a.id) })
+  }
+  for (const r of ranges ?? []) {
     const at = text.indexOf(r)
     if (at >= 0) cuts.push({ start: at, end: at + r.length, r })
   }
-  cuts.sort((a, b) => a.start - b.start)
+  if (cuts.length === 0) return text
+  cuts.sort((a, b) => a.start - b.start || (a.ids ? -1 : 1))
   const out = []
   let pos = 0
   for (const c of cuts) {
     if (c.start < pos) continue
     if (c.start > pos) out.push(text.slice(pos, c.start))
-    out.push(<span key={c.start} className="ir-hl-range" title="点击取消这段划线" onClick={e => { e.stopPropagation(); onRemove(c.r) }}>{text.slice(c.start, c.end)}</span>)
+    const piece = text.slice(c.start, c.end)
+    if (c.ids) {
+      const on = ctl.card && ctl.card.ids.join() === c.ids.join()
+      out.push(<span key={c.start} className={`ir-ask-anchor${on ? ' ir-on' : ''}`} {...ctl.anchorProps(c.ids)}>{piece}</span>)
+    } else {
+      out.push(<span key={c.start} className="ir-hl-range" title="点击取消这段划线" onClick={e => { e.stopPropagation(); onRemove(c.r) }}>{piece}</span>)
+    }
     pos = c.end
   }
   if (pos < text.length) out.push(text.slice(pos))
   return out
 }
 
-/** 段落下方的追问记录 */
-function AskList({ asks, asking, onRemove }) {
-  if ((!asks || asks.length === 0) && !asking) return null
+/** 追问答案卡：悬停锚点时浮出，点击锚点钉住；点外面或 Esc 关闭 */
+function useAskCard(hostRef) {
+  const [card, setCard] = useState(null) // {ids, x, y, w, pinned}
+  const hideTimer = useRef(null)
+  const cardRef = useRef(null)
+  const show = (ids, el, pinned) => {
+    clearTimeout(hideTimer.current)
+    const host = hostRef.current?.getBoundingClientRect()
+    if (!host || !el) return
+    const r = el.getBoundingClientRect()
+    const w = Math.min(480, host.width)
+    // 卡片紧贴锚点下沿：中间不留缝，鼠标从锚点往下移进卡片时不会先触发隐藏
+    setCard({ ids, pinned, w, x: Math.max(0, Math.min(r.left - host.left, host.width - w)), y: r.bottom - host.top })
+  }
+  const keep = () => clearTimeout(hideTimer.current)
+  const hideSoon = () => { clearTimeout(hideTimer.current); hideTimer.current = setTimeout(() => setCard(c => (c && !c.pinned ? null : c)), 300) }
+  const anchorProps = (ids) => ({
+    'data-ask': ids.join(' '),
+    onMouseEnter: e => { if (!card?.pinned) show(ids, e.currentTarget, false) },
+    onMouseLeave: hideSoon,
+    onMouseUp: e => e.stopPropagation(),
+    onClick: e => {
+      e.stopPropagation()
+      if (card?.pinned && card.ids.join() === ids.join()) setCard(null)
+      else show(ids, e.currentTarget, true)
+    },
+  })
+  const openFor = (id) => {
+    const el = hostRef.current?.querySelector(`[data-ask~="${id}"]`)
+    if (el) show(el.dataset.ask.split(' '), el, true)
+  }
+  useEffect(() => {
+    if (!card?.pinned) return
+    const onDown = e => {
+      if (cardRef.current?.contains(e.target)) return
+      if (hostRef.current?.contains(e.target) && e.target.closest?.('[data-ask]')) return
+      setCard(null)
+    }
+    const onKey = e => { if (e.key === 'Escape') setCard(null) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [card?.pinned])
+  // 从「追问」页签跳过来时打开对应的卡。阅读页会轮询重渲染，监听与计时器只在挂载 / 卸载时处理
+  const openRef = useRef(openFor)
+  openRef.current = openFor
+  useEffect(() => {
+    const onOpen = e => openRef.current(e.detail)
+    window.addEventListener('ir-open-ask', onOpen)
+    return () => { window.removeEventListener('ir-open-ask', onOpen); clearTimeout(hideTimer.current) }
+  }, [])
+  return { card, cardRef, anchorProps, openFor, keep, hideSoon }
+}
+
+function AskCard({ ctl, asks, onRemove }) {
+  const { card } = ctl
+  if (!card) return null
+  const list = (asks ?? []).filter(a => card.ids.includes(a.id))
+  if (list.length === 0) return null
   return (
-    <>
-      {(asks ?? []).map(a => (
-        <div key={a.id} className="ir-note ir-ask" onClick={e => e.stopPropagation()}>
+    <div className="ir-ask-card" ref={ctl.cardRef} style={{ left: card.x, top: card.y, width: card.w }} onMouseEnter={ctl.keep} onMouseLeave={ctl.hideSoon} onClick={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()}>
+      {list.map(a => (
+        <div key={a.id} className="ir-ask ir-ask-item">
           <b>{ASK_LABEL[a.kind] ?? '追问'}</b>
           {a.selection ? <i className="ir-ask-q">「{a.selection}」</i> : null}
           {a.kind === 'custom' && a.question ? <i className="ir-ask-q">{a.question}</i> : null}
           <span className="ir-ask-answer">{a.answer}</span>
-          <button className="ir-link ir-ask-del" onClick={() => onRemove(a.id)}>删</button>
+          <button className="ir-link ir-ask-del" onClick={() => onRemove(a.id)}>删除</button>
         </div>
       ))}
-      {asking ? <div className="ir-note ir-ask" onClick={e => e.stopPropagation()}><b>{asking.label}</b>{asking.detail ? <i className="ir-ask-q">{asking.detail}</i> : null}<span className="ir-pending">思考中…</span></div> : null}
-    </>
+    </div>
   )
+}
+
+/** 段尾的「问」：没有锚点的追问（整段提问、选中的字不在当前显示的文字里） */
+function AskMark({ asks, ctl }) {
+  if (!asks || asks.length === 0) return null
+  const ids = asks.map(a => a.id)
+  const on = ctl.card && ctl.card.ids.join() === ids.join()
+  return <span className={`ir-ask-mark${on ? ' ir-on' : ''}`} title="追问" {...ctl.anchorProps(ids)}>问{asks.length > 1 ? asks.length : ''}</span>
+}
+
+/** 正在问的那一条：答案回来后收进锚点 */
+function AskPending({ asking }) {
+  if (!asking) return null
+  return <div className="ir-note ir-ask" onClick={e => e.stopPropagation()}><b>{asking.label}</b>{asking.detail ? <i className="ir-ask-q">{asking.detail}</i> : null}<span className="ir-pending">思考中…</span></div>
 }
 
 /** 选中宿主元素里的文字时算出浮层位置。locate(text) 返回 'zh' | 'src' | null，null 表示不弹。 */
@@ -508,7 +601,7 @@ function useSelectionPop(hostRef, locate) {
 }
 
 /** 追问的状态与输入行：run 直接问，openFor 打开输入行（可带选中的文字） */
-function useAsk(onAsk, placeholder) {
+function useAsk(onAsk, placeholder, onDone) {
   const [open, setOpen] = useState(false)
   const [sel, setSel] = useState('')
   const [draft, setDraft] = useState('')
@@ -517,7 +610,7 @@ function useAsk(onAsk, placeholder) {
   const run = async ({ selection = '', question = '', kind }) => {
     setErr('')
     setAsking({ label: ASK_LABEL[kind], detail: kind === 'explain' ? `「${selection}」` : kind === 'custom' ? question : '' })
-    try { await onAsk({ selection, question, kind }) } catch (e) { setErr(e.message) } finally { setAsking(null) }
+    try { const item = await onAsk({ selection, question, kind }); if (item?.id && onDone) setTimeout(() => onDone(item), 80) } catch (e) { setErr(e.message) } finally { setAsking(null) }
   }
   const submit = () => {
     const q = draft.trim()
@@ -541,7 +634,9 @@ function useAsk(onAsk, placeholder) {
 function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
   const hostRef = useRef(null)
   const { selection, onMouseUp, onTouchEnd, clear } = useSelectionPop(hostRef, t => (text.includes(t) ? 'zh' : null))
-  const ask = useAsk(onAsk, `对这段${label}想问什么…`)
+  const ctl = useAskCard(hostRef)
+  const ask = useAsk(onAsk, `对这段${label}想问什么…`, item => ctl.openFor(item.id))
+  const { groups, rest } = splitAsks(text, asks)
   return (
     <div className="ir-intro" data-para={paraId} ref={hostRef} onMouseUp={onMouseUp} onTouchEnd={onTouchEnd}>
       {selection ? (
@@ -550,9 +645,10 @@ function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
           <button onClick={() => { ask.openFor(selection.text); clear() }}>追问</button>
         </span>
       ) : null}
-      <b>{label}</b><p>{text}</p>
+      <b>{label}</b><p><Annotated text={text} groups={groups} ctl={ctl} /><AskMark asks={rest} ctl={ctl} /></p>
+      <AskCard ctl={ctl} asks={asks} onRemove={onRemoveAsk} />
       {ask.row}
-      <AskList asks={asks} asking={ask.asking} onRemove={onRemoveAsk} />
+      <AskPending asking={ask.asking} />
       {ask.err ? <div className="ir-note"><b>错误</b>{ask.err}</div> : null}
     </div>
   )
@@ -561,8 +657,12 @@ function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
 function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
   const hostRef = useRef(null)
   const { selection, onMouseUp, onTouchEnd, clear: clearSelection } = useSelectionPop(hostRef, text => (p.zh && p.zh.includes(text) ? 'zh' : p.text.includes(text) ? 'src' : null))
-  const ask = useAsk(onAsk, '对这一段想问什么…')
+  const ctl = useAskCard(hostRef)
+  const ask = useAsk(onAsk, '对这一段想问什么…', item => ctl.openFor(item.id))
   const { asking, err, setErr, run: runAsk } = ask
+  // 锚点挂在主文字上：原文模式或还没译时是原文，否则是译文；表格只用段尾「问」
+  const mainText = display === 'original' || !p.zh ? p.text : p.zh
+  const { groups: askGroups, rest: askRest } = p.kind === 'table' ? { groups: new Map(), rest: asks ?? [] } : splitAsks(mainText, asks)
   const [showSrc, setShowSrc] = useState(false)
   const [editNote, setEditNote] = useState(false)
   const [noteDraft, setNoteDraft] = useState(mark?.note ?? '')
@@ -608,13 +708,13 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
     </span>
   ) : null
   const askRow = ask.row
-  const askList = <AskList asks={asks} asking={asking} onRemove={onRemoveAsk} />
+  const askList = <><AskCard ctl={ctl} asks={asks} onRemove={onRemoveAsk} /><AskPending asking={asking} /></>
 
   if (display === 'original') {
     return (
       <div className={kindClass} data-para={p.id} ref={hostRef} onMouseUp={onMouseUp} onTouchEnd={onTouchEnd}>
         {popover}
-        {isTable ? <TableView text={p.text} header={p.header} /> : <div className="ir-src">{p.text}{(p.notes ?? []).filter(n => n.paraId).map((n, i) => <Footnote key={i} bookId={bookId} note={n} />)}</div>}
+        {isTable ? <><TableView text={p.text} header={p.header} /><AskMark asks={askRest} ctl={ctl} /></> : <div className="ir-src"><Annotated text={p.text} groups={askGroups} ctl={ctl} /><AskMark asks={askRest} ctl={ctl} />{(p.notes ?? []).filter(n => n.paraId).map((n, i) => <Footnote key={i} bookId={bookId} note={n} />)}</div>}
         {askRow}
         {askList}
         {err ? <div className="ir-note"><b>错误</b>{err}</div> : null}
@@ -627,8 +727,9 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
       {popover}
       {p.zh ? (
         <div className={`ir-zh${mark?.highlight ? ' ir-hl' : ''}`} onClick={() => { if (display === 'zh' && !selection) setShowSrc(v => !v) }}>
-          {isTable ? <TableView text={p.zh} header={p.header} /> : <Highlighted text={p.zh} ranges={mark?.ranges} onRemove={r => onMark({ removeRange: r })} />}
+          {isTable ? <TableView text={p.zh} header={p.header} /> : <Annotated text={p.zh} ranges={mark?.ranges} onRemove={r => onMark({ removeRange: r })} groups={askGroups} ctl={ctl} />}
           {p.note ? <span className="ir-note-mark" onClick={e => { e.stopPropagation(); setShowNote(v => !v) }}>注</span> : null}
+          <AskMark asks={askRest} ctl={ctl} />
           {(p.notes ?? []).filter(n => n.paraId).map((n, i) => <Footnote key={i} bookId={bookId} note={n} />)}
         </div>
       ) : null}
@@ -640,7 +741,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
           <button className="ir-plain" onClick={() => setEditNote(false)}>取消</button>
         </div>
       ) : null}
-      {srcVisible ? (isTable ? <div className="ir-src"><TableView text={p.text} muted header={p.header} />{!p.zh ? <span className="ir-pending">待译</span> : null}</div> : <div className="ir-src">{p.text}{!p.zh && !isHeading ? <span className="ir-pending">待译</span> : null}</div>) : null}
+      {srcVisible ? (isTable ? <div className="ir-src"><TableView text={p.text} muted header={p.header} />{!p.zh ? <><AskMark asks={askRest} ctl={ctl} /><span className="ir-pending">待译</span></> : null}</div> : <div className="ir-src">{p.zh ? p.text : <><Annotated text={p.text} groups={askGroups} ctl={ctl} /><AskMark asks={askRest} ctl={ctl} /></>}{!p.zh && !isHeading ? <span className="ir-pending">待译</span> : null}</div>) : null}
       {showNote && p.note ? <div className="ir-note"><b>译注</b>{p.note}</div> : null}
       {showSrc && display === 'zh' && p.zh ? (
         <div className="ir-para-tools">
@@ -763,7 +864,7 @@ function AsksTab({ book, asks, onGo }) {
         const ch = chapterOf(a)
         const head = a.selection ? `「${a.selection}」` : a.kind === 'custom' ? a.question : ASK_LABEL[a.kind]
         return (
-          <button key={a.id} className="ir-toc-item ir-hit" onClick={() => onGo(ch?.id, a.paraId)}>
+          <button key={a.id} className="ir-toc-item ir-hit" onClick={() => { onGo(ch?.id, a.paraId); setTimeout(() => window.dispatchEvent(new CustomEvent('ir-open-ask', { detail: a.id })), 500) }}>
             <span className="ir-hit-body"><span className="ir-hit-ch">{ch?.title ?? a.paraId}</span><span className="ir-hit-range" style={{ textDecoration: 'none' }}>{head}</span>{String(a.answer ?? '').slice(0, 90)}{a.answer && a.answer.length > 90 ? '…' : ''}</span>
           </button>
         )

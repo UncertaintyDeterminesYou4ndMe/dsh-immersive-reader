@@ -7,7 +7,7 @@
  * 产物提交进仓库，安装方不需要 bun。
  */
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -40,7 +40,9 @@ ${bundle}
   },
 })
 `
-writeFileSync(join(ROOT, 'client.js'), wrapped)
+// 先写临时文件再改名：宿主随时可能读 client.js，不能让它读到写了一半的文件
+writeFileSync(join(ROOT, 'client.js.tmp'), wrapped)
+renameSync(join(ROOT, 'client.js.tmp'), join(ROOT, 'client.js'))
 
 // 求值一遍：语法 + 顶层引用错误在这里就炸，而不是装进 dsh 后面板静默消失
 const fakeReact = new Proxy(function () {}, { get: (_t, key) => (key === '__esModule' ? false : key === 'default' ? fakeReact : function () {}) })

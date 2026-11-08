@@ -109,6 +109,14 @@ export const CSS = `
 .ir-root .ir-sel-pop button + button { border-left: 1px solid var(--ir-line); }
 .ir-root .ir-sel-pop button:hover { background: var(--ir-bg-2); }
 .ir-ask { border-left-color: var(--ir-fg-2); white-space: pre-wrap; }
+.ir-ask-anchor { text-decoration: underline dotted; text-decoration-color: var(--ir-fg-3); text-decoration-thickness: 1px; text-underline-offset: 5px; cursor: pointer; }
+.ir-ask-anchor:hover, .ir-ask-anchor.ir-on { text-decoration-color: var(--ir-accent); }
+.ir-ask-mark { font-family: var(--ir-sans); font-size: .7em; color: var(--ir-fg-3); vertical-align: super; margin-left: 2px; cursor: pointer; user-select: none; }
+.ir-ask-mark:hover, .ir-ask-mark.ir-on { color: var(--ir-accent); }
+.ir-ask-card { position: absolute; z-index: 4; box-sizing: border-box; max-height: 50vh; overflow-y: auto; background: var(--ir-bg); border: 1px solid var(--ir-fg-3); padding: 10px 12px; font-family: var(--ir-sans); font-size: 13px; line-height: 1.7; font-weight: normal; color: var(--ir-fg); text-align: left; text-indent: 0; }
+.ir-ask-card .ir-ask-item { white-space: pre-wrap; }
+.ir-ask-card .ir-ask-item + .ir-ask-item { border-top: 1px solid var(--ir-line); margin-top: 8px; padding-top: 8px; }
+.ir-ask-card b { font-weight: normal; color: var(--ir-fg-2); margin-right: 6px; }
 .ir-ask b { color: var(--ir-fg-2); }
 .ir-ask .ir-ask-q { font-style: normal; color: var(--ir-fg); margin-right: 8px; }
 .ir-ask .ir-ask-answer { display: block; margin-top: 4px; color: var(--ir-fg); }
@@ -179,7 +187,10 @@ export const CSS = `
 `
 
 export function ensureStyle(doc) {
-  if (!doc || !doc.head || doc.getElementById(STYLE_ID)) return
+  if (!doc || !doc.head) return
+  // 插件更新后宿主可能还留着旧的样式标签：同 id 已存在就换成当前内容
+  const existing = doc.getElementById(STYLE_ID)
+  if (existing) { if (existing.textContent !== CSS) existing.textContent = CSS; return }
   const tag = doc.createElement('style')
   tag.id = STYLE_ID
   tag.textContent = CSS

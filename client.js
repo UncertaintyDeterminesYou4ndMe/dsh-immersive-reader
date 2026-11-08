@@ -226,6 +226,14 @@ var CSS = `
 .ir-root .ir-sel-pop button + button { border-left: 1px solid var(--ir-line); }
 .ir-root .ir-sel-pop button:hover { background: var(--ir-bg-2); }
 .ir-ask { border-left-color: var(--ir-fg-2); white-space: pre-wrap; }
+.ir-ask-anchor { text-decoration: underline dotted; text-decoration-color: var(--ir-fg-3); text-decoration-thickness: 1px; text-underline-offset: 5px; cursor: pointer; }
+.ir-ask-anchor:hover, .ir-ask-anchor.ir-on { text-decoration-color: var(--ir-accent); }
+.ir-ask-mark { font-family: var(--ir-sans); font-size: .7em; color: var(--ir-fg-3); vertical-align: super; margin-left: 2px; cursor: pointer; user-select: none; }
+.ir-ask-mark:hover, .ir-ask-mark.ir-on { color: var(--ir-accent); }
+.ir-ask-card { position: absolute; z-index: 4; box-sizing: border-box; max-height: 50vh; overflow-y: auto; background: var(--ir-bg); border: 1px solid var(--ir-fg-3); padding: 10px 12px; font-family: var(--ir-sans); font-size: 13px; line-height: 1.7; font-weight: normal; color: var(--ir-fg); text-align: left; text-indent: 0; }
+.ir-ask-card .ir-ask-item { white-space: pre-wrap; }
+.ir-ask-card .ir-ask-item + .ir-ask-item { border-top: 1px solid var(--ir-line); margin-top: 8px; padding-top: 8px; }
+.ir-ask-card b { font-weight: normal; color: var(--ir-fg-2); margin-right: 6px; }
 .ir-ask b { color: var(--ir-fg-2); }
 .ir-ask .ir-ask-q { font-style: normal; color: var(--ir-fg); margin-right: 8px; }
 .ir-ask .ir-ask-answer { display: block; margin-top: 4px; color: var(--ir-fg); }
@@ -295,8 +303,14 @@ var CSS = `
 }
 `;
 function ensureStyle(doc) {
-  if (!doc || !doc.head || doc.getElementById(STYLE_ID))
+  if (!doc || !doc.head)
     return;
+  const existing = doc.getElementById(STYLE_ID);
+  if (existing) {
+    if (existing.textContent !== CSS)
+      existing.textContent = CSS;
+    return;
+  }
   const tag = doc.createElement("style");
   tag.id = STYLE_ID;
   tag.textContent = CSS;
@@ -1110,16 +1124,34 @@ function Footnote({ bookId, note }) {
     className: "ir-pending"
   }, "译文生成中…")) : "载入中…" : "这个脚注在书里找不到对应的注释") : null);
 }
-function Highlighted({ text, ranges, onRemove }) {
-  if (!ranges || ranges.length === 0)
-    return text;
+function splitAsks(text, asks) {
+  const groups = new Map;
+  const rest = [];
+  for (const a of asks ?? []) {
+    if (text && a.selection && text.includes(a.selection)) {
+      if (!groups.has(a.selection))
+        groups.set(a.selection, []);
+      groups.get(a.selection).push(a);
+    } else
+      rest.push(a);
+  }
+  return { groups, rest };
+}
+function Annotated({ text, ranges, onRemove, groups, ctl }) {
   const cuts = [];
-  for (const r of ranges) {
+  for (const [sel, list] of groups ?? []) {
+    const at = text.indexOf(sel);
+    if (at >= 0)
+      cuts.push({ start: at, end: at + sel.length, ids: list.map((a) => a.id) });
+  }
+  for (const r of ranges ?? []) {
     const at = text.indexOf(r);
     if (at >= 0)
       cuts.push({ start: at, end: at + r.length, r });
   }
-  cuts.sort((a, b) => a.start - b.start);
+  if (cuts.length === 0)
+    return text;
+  cuts.sort((a, b) => a.start - b.start || (a.ids ? -1 : 1));
   const out = [];
   let pos = 0;
   for (const c of cuts) {
@@ -1127,28 +1159,121 @@ function Highlighted({ text, ranges, onRemove }) {
       continue;
     if (c.start > pos)
       out.push(text.slice(pos, c.start));
-    out.push(/* @__PURE__ */ import_react2.default.createElement("span", {
-      key: c.start,
-      className: "ir-hl-range",
-      title: "点击取消这段划线",
-      onClick: (e) => {
-        e.stopPropagation();
-        onRemove(c.r);
-      }
-    }, text.slice(c.start, c.end)));
+    const piece = text.slice(c.start, c.end);
+    if (c.ids) {
+      const on = ctl.card && ctl.card.ids.join() === c.ids.join();
+      out.push(/* @__PURE__ */ import_react2.default.createElement("span", {
+        key: c.start,
+        className: `ir-ask-anchor${on ? " ir-on" : ""}`,
+        ...ctl.anchorProps(c.ids)
+      }, piece));
+    } else {
+      out.push(/* @__PURE__ */ import_react2.default.createElement("span", {
+        key: c.start,
+        className: "ir-hl-range",
+        title: "点击取消这段划线",
+        onClick: (e) => {
+          e.stopPropagation();
+          onRemove(c.r);
+        }
+      }, piece));
+    }
     pos = c.end;
   }
   if (pos < text.length)
     out.push(text.slice(pos));
   return out;
 }
-function AskList({ asks, asking, onRemove }) {
-  if ((!asks || asks.length === 0) && !asking)
+function useAskCard(hostRef) {
+  const [card, setCard] = import_react2.useState(null);
+  const hideTimer = import_react2.useRef(null);
+  const cardRef = import_react2.useRef(null);
+  const show = (ids, el, pinned) => {
+    clearTimeout(hideTimer.current);
+    const host = hostRef.current?.getBoundingClientRect();
+    if (!host || !el)
+      return;
+    const r = el.getBoundingClientRect();
+    const w = Math.min(480, host.width);
+    setCard({ ids, pinned, w, x: Math.max(0, Math.min(r.left - host.left, host.width - w)), y: r.bottom - host.top });
+  };
+  const keep = () => clearTimeout(hideTimer.current);
+  const hideSoon = () => {
+    clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setCard((c) => c && !c.pinned ? null : c), 300);
+  };
+  const anchorProps = (ids) => ({
+    "data-ask": ids.join(" "),
+    onMouseEnter: (e) => {
+      if (!card?.pinned)
+        show(ids, e.currentTarget, false);
+    },
+    onMouseLeave: hideSoon,
+    onMouseUp: (e) => e.stopPropagation(),
+    onClick: (e) => {
+      e.stopPropagation();
+      if (card?.pinned && card.ids.join() === ids.join())
+        setCard(null);
+      else
+        show(ids, e.currentTarget, true);
+    }
+  });
+  const openFor = (id) => {
+    const el = hostRef.current?.querySelector(`[data-ask~="${id}"]`);
+    if (el)
+      show(el.dataset.ask.split(" "), el, true);
+  };
+  import_react2.useEffect(() => {
+    if (!card?.pinned)
+      return;
+    const onDown = (e) => {
+      if (cardRef.current?.contains(e.target))
+        return;
+      if (hostRef.current?.contains(e.target) && e.target.closest?.("[data-ask]"))
+        return;
+      setCard(null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape")
+        setCard(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [card?.pinned]);
+  const openRef = import_react2.useRef(openFor);
+  openRef.current = openFor;
+  import_react2.useEffect(() => {
+    const onOpen = (e) => openRef.current(e.detail);
+    window.addEventListener("ir-open-ask", onOpen);
+    return () => {
+      window.removeEventListener("ir-open-ask", onOpen);
+      clearTimeout(hideTimer.current);
+    };
+  }, []);
+  return { card, cardRef, anchorProps, openFor, keep, hideSoon };
+}
+function AskCard({ ctl, asks, onRemove }) {
+  const { card } = ctl;
+  if (!card)
     return null;
-  return /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, (asks ?? []).map((a) => /* @__PURE__ */ import_react2.default.createElement("div", {
+  const list = (asks ?? []).filter((a) => card.ids.includes(a.id));
+  if (list.length === 0)
+    return null;
+  return /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-ask-card",
+    ref: ctl.cardRef,
+    style: { left: card.x, top: card.y, width: card.w },
+    onMouseEnter: ctl.keep,
+    onMouseLeave: ctl.hideSoon,
+    onClick: (e) => e.stopPropagation(),
+    onMouseUp: (e) => e.stopPropagation()
+  }, list.map((a) => /* @__PURE__ */ import_react2.default.createElement("div", {
     key: a.id,
-    className: "ir-note ir-ask",
-    onClick: (e) => e.stopPropagation()
+    className: "ir-ask ir-ask-item"
   }, /* @__PURE__ */ import_react2.default.createElement("b", null, ASK_LABEL[a.kind] ?? "追问"), a.selection ? /* @__PURE__ */ import_react2.default.createElement("i", {
     className: "ir-ask-q"
   }, "「", a.selection, "」") : null, a.kind === "custom" && a.question ? /* @__PURE__ */ import_react2.default.createElement("i", {
@@ -1158,14 +1283,30 @@ function AskList({ asks, asking, onRemove }) {
   }, a.answer), /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-link ir-ask-del",
     onClick: () => onRemove(a.id)
-  }, "删"))), asking ? /* @__PURE__ */ import_react2.default.createElement("div", {
+  }, "删除"))));
+}
+function AskMark({ asks, ctl }) {
+  if (!asks || asks.length === 0)
+    return null;
+  const ids = asks.map((a) => a.id);
+  const on = ctl.card && ctl.card.ids.join() === ids.join();
+  return /* @__PURE__ */ import_react2.default.createElement("span", {
+    className: `ir-ask-mark${on ? " ir-on" : ""}`,
+    title: "追问",
+    ...ctl.anchorProps(ids)
+  }, "问", asks.length > 1 ? asks.length : "");
+}
+function AskPending({ asking }) {
+  if (!asking)
+    return null;
+  return /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-note ir-ask",
     onClick: (e) => e.stopPropagation()
   }, /* @__PURE__ */ import_react2.default.createElement("b", null, asking.label), asking.detail ? /* @__PURE__ */ import_react2.default.createElement("i", {
     className: "ir-ask-q"
   }, asking.detail) : null, /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-pending"
-  }, "思考中…")) : null);
+  }, "思考中…"));
 }
 function useSelectionPop(hostRef, locate) {
   const [selection, setSelection] = import_react2.useState(null);
@@ -1198,7 +1339,7 @@ function useSelectionPop(hostRef, locate) {
   };
   return { selection, onMouseUp, onTouchEnd, clear };
 }
-function useAsk(onAsk, placeholder) {
+function useAsk(onAsk, placeholder, onDone) {
   const [open, setOpen] = import_react2.useState(false);
   const [sel, setSel] = import_react2.useState("");
   const [draft, setDraft] = import_react2.useState("");
@@ -1208,7 +1349,9 @@ function useAsk(onAsk, placeholder) {
     setErr("");
     setAsking({ label: ASK_LABEL[kind], detail: kind === "explain" ? `「${selection}」` : kind === "custom" ? question : "" });
     try {
-      await onAsk({ selection, question, kind });
+      const item = await onAsk({ selection, question, kind });
+      if (item?.id && onDone)
+        setTimeout(() => onDone(item), 80);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -1262,7 +1405,9 @@ function useAsk(onAsk, placeholder) {
 function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
   const hostRef = import_react2.useRef(null);
   const { selection, onMouseUp, onTouchEnd, clear } = useSelectionPop(hostRef, (t) => text.includes(t) ? "zh" : null);
-  const ask = useAsk(onAsk, `对这段${label}想问什么…`);
+  const ctl = useAskCard(hostRef);
+  const ask = useAsk(onAsk, `对这段${label}想问什么…`, (item) => ctl.openFor(item.id));
+  const { groups, rest } = splitAsks(text, asks);
   return /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-intro",
     "data-para": paraId,
@@ -1286,10 +1431,19 @@ function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
       ask.openFor(selection.text);
       clear();
     }
-  }, "追问")) : null, /* @__PURE__ */ import_react2.default.createElement("b", null, label), /* @__PURE__ */ import_react2.default.createElement("p", null, text), ask.row, /* @__PURE__ */ import_react2.default.createElement(AskList, {
+  }, "追问")) : null, /* @__PURE__ */ import_react2.default.createElement("b", null, label), /* @__PURE__ */ import_react2.default.createElement("p", null, /* @__PURE__ */ import_react2.default.createElement(Annotated, {
+    text,
+    groups,
+    ctl
+  }), /* @__PURE__ */ import_react2.default.createElement(AskMark, {
+    asks: rest,
+    ctl
+  })), /* @__PURE__ */ import_react2.default.createElement(AskCard, {
+    ctl,
     asks,
-    asking: ask.asking,
     onRemove: onRemoveAsk
+  }), ask.row, /* @__PURE__ */ import_react2.default.createElement(AskPending, {
+    asking: ask.asking
   }), ask.err ? /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-note"
   }, /* @__PURE__ */ import_react2.default.createElement("b", null, "错误"), ask.err) : null);
@@ -1297,8 +1451,11 @@ function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
 function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
   const hostRef = import_react2.useRef(null);
   const { selection, onMouseUp, onTouchEnd, clear: clearSelection } = useSelectionPop(hostRef, (text) => p.zh && p.zh.includes(text) ? "zh" : p.text.includes(text) ? "src" : null);
-  const ask = useAsk(onAsk, "对这一段想问什么…");
+  const ctl = useAskCard(hostRef);
+  const ask = useAsk(onAsk, "对这一段想问什么…", (item) => ctl.openFor(item.id));
   const { asking, err, setErr, run: runAsk } = ask;
+  const mainText = display === "original" || !p.zh ? p.text : p.zh;
+  const { groups: askGroups, rest: askRest } = p.kind === "table" ? { groups: new Map, rest: asks ?? [] } : splitAsks(mainText, asks);
   const [showSrc, setShowSrc] = import_react2.useState(false);
   const [editNote, setEditNote] = import_react2.useState(false);
   const [noteDraft, setNoteDraft] = import_react2.useState(mark?.note ?? "");
@@ -1380,11 +1537,13 @@ ${p.zh}
     }
   }, "追问")) : null;
   const askRow = ask.row;
-  const askList = /* @__PURE__ */ import_react2.default.createElement(AskList, {
+  const askList = /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, /* @__PURE__ */ import_react2.default.createElement(AskCard, {
+    ctl,
     asks,
-    asking,
     onRemove: onRemoveAsk
-  });
+  }), /* @__PURE__ */ import_react2.default.createElement(AskPending, {
+    asking
+  }));
   if (display === "original") {
     return /* @__PURE__ */ import_react2.default.createElement("div", {
       className: kindClass,
@@ -1392,12 +1551,22 @@ ${p.zh}
       ref: hostRef,
       onMouseUp,
       onTouchEnd
-    }, popover, isTable ? /* @__PURE__ */ import_react2.default.createElement(TableView, {
+    }, popover, isTable ? /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, /* @__PURE__ */ import_react2.default.createElement(TableView, {
       text: p.text,
       header: p.header
-    }) : /* @__PURE__ */ import_react2.default.createElement("div", {
+    }), /* @__PURE__ */ import_react2.default.createElement(AskMark, {
+      asks: askRest,
+      ctl
+    })) : /* @__PURE__ */ import_react2.default.createElement("div", {
       className: "ir-src"
-    }, p.text, (p.notes ?? []).filter((n) => n.paraId).map((n, i) => /* @__PURE__ */ import_react2.default.createElement(Footnote, {
+    }, /* @__PURE__ */ import_react2.default.createElement(Annotated, {
+      text: p.text,
+      groups: askGroups,
+      ctl
+    }), /* @__PURE__ */ import_react2.default.createElement(AskMark, {
+      asks: askRest,
+      ctl
+    }), (p.notes ?? []).filter((n) => n.paraId).map((n, i) => /* @__PURE__ */ import_react2.default.createElement(Footnote, {
       key: i,
       bookId,
       note: n
@@ -1421,17 +1590,22 @@ ${p.zh}
   }, isTable ? /* @__PURE__ */ import_react2.default.createElement(TableView, {
     text: p.zh,
     header: p.header
-  }) : /* @__PURE__ */ import_react2.default.createElement(Highlighted, {
+  }) : /* @__PURE__ */ import_react2.default.createElement(Annotated, {
     text: p.zh,
     ranges: mark?.ranges,
-    onRemove: (r) => onMark({ removeRange: r })
+    onRemove: (r) => onMark({ removeRange: r }),
+    groups: askGroups,
+    ctl
   }), p.note ? /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-note-mark",
     onClick: (e) => {
       e.stopPropagation();
       setShowNote((v) => !v);
     }
-  }, "注") : null, (p.notes ?? []).filter((n) => n.paraId).map((n, i) => /* @__PURE__ */ import_react2.default.createElement(Footnote, {
+  }, "注") : null, /* @__PURE__ */ import_react2.default.createElement(AskMark, {
+    asks: askRest,
+    ctl
+  }), (p.notes ?? []).filter((n) => n.paraId).map((n, i) => /* @__PURE__ */ import_react2.default.createElement(Footnote, {
     key: i,
     bookId,
     note: n
@@ -1465,11 +1639,21 @@ ${p.zh}
     text: p.text,
     muted: true,
     header: p.header
-  }), !p.zh ? /* @__PURE__ */ import_react2.default.createElement("span", {
+  }), !p.zh ? /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, /* @__PURE__ */ import_react2.default.createElement(AskMark, {
+    asks: askRest,
+    ctl
+  }), /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-pending"
-  }, "待译") : null) : /* @__PURE__ */ import_react2.default.createElement("div", {
+  }, "待译")) : null) : /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-src"
-  }, p.text, !p.zh && !isHeading ? /* @__PURE__ */ import_react2.default.createElement("span", {
+  }, p.zh ? p.text : /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, /* @__PURE__ */ import_react2.default.createElement(Annotated, {
+    text: p.text,
+    groups: askGroups,
+    ctl
+  }), /* @__PURE__ */ import_react2.default.createElement(AskMark, {
+    asks: askRest,
+    ctl
+  })), !p.zh && !isHeading ? /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-pending"
   }, "待译") : null) : null, showNote && p.note ? /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-note"
@@ -1695,7 +1879,10 @@ function AsksTab({ book, asks, onGo }) {
     return /* @__PURE__ */ import_react2.default.createElement("button", {
       key: a.id,
       className: "ir-toc-item ir-hit",
-      onClick: () => onGo(ch?.id, a.paraId)
+      onClick: () => {
+        onGo(ch?.id, a.paraId);
+        setTimeout(() => window.dispatchEvent(new CustomEvent("ir-open-ask", { detail: a.id })), 500);
+      }
     }, /* @__PURE__ */ import_react2.default.createElement("span", {
       className: "ir-hit-body"
     }, /* @__PURE__ */ import_react2.default.createElement("span", {

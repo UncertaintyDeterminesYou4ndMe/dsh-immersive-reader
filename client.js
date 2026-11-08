@@ -302,17 +302,20 @@ var CSS = `
   .ir-field .ir-field-help { grid-column: 1; }
 }
 `;
+var PLUGIN_ID = "dsh-immersive-reader";
 function ensureStyle(doc) {
   if (!doc || !doc.head)
     return;
   const existing = doc.getElementById(STYLE_ID);
   if (existing) {
+    existing.setAttribute("data-plugin", PLUGIN_ID);
     if (existing.textContent !== CSS)
       existing.textContent = CSS;
     return;
   }
   const tag = doc.createElement("style");
   tag.id = STYLE_ID;
+  tag.setAttribute("data-plugin", PLUGIN_ID);
   tag.textContent = CSS;
   doc.head.appendChild(tag);
 }

@@ -186,13 +186,16 @@ export const CSS = `
 }
 `
 
+const PLUGIN_ID = 'dsh-immersive-reader'
+
 export function ensureStyle(doc) {
   if (!doc || !doc.head) return
-  // 插件更新后宿主可能还留着旧的样式标签：同 id 已存在就换成当前内容
+  // data-plugin 让 dsh 热更新插件时删掉旧样式；万一旧标签还在，就换成当前内容
   const existing = doc.getElementById(STYLE_ID)
-  if (existing) { if (existing.textContent !== CSS) existing.textContent = CSS; return }
+  if (existing) { existing.setAttribute('data-plugin', PLUGIN_ID); if (existing.textContent !== CSS) existing.textContent = CSS; return }
   const tag = doc.createElement('style')
   tag.id = STYLE_ID
+  tag.setAttribute('data-plugin', PLUGIN_ID)
   tag.textContent = CSS
   doc.head.appendChild(tag)
 }

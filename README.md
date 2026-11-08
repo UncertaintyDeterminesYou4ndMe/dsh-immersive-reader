@@ -1,4 +1,4 @@
-# dsh-immersive-reader · 译读
+# dsh-immersive-reader · 阅读室
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）里用母语读原版书。
 
@@ -34,7 +34,7 @@ dsh plugin --profile web add /path/to/dsh-immersive-reader                      
 
 `client.js` 是已打好的浏览器产物，直接从 Git 源安装即可，不需要 bun。
 
-重启 `dsh web`，左侧栏多一个「译读」图标。DSH-Android 同样走 dsh 的插件安装，界面是同一套。
+重启 `dsh web`，左侧栏多一个「阅读室」图标。DSH-Android 同样走 dsh 的插件安装，界面是同一套。
 
 官方桌面版（deepseek.com/harness/ 下载）独占自己的 profile：先打开过一次桌面版并完全退出，再用它自带的命令安装，或在应用内「插件」页添加：
 

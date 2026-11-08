@@ -28,7 +28,7 @@ class Boundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <div className="ir-root"><div className="ir-error">译读界面出错：{String(this.state.error?.message ?? this.state.error)} <button className="ir-link" onClick={() => this.setState({ error: null })}>重试</button></div></div>
+        <div className="ir-root"><div className="ir-error">阅读室界面出错：{String(this.state.error?.message ?? this.state.error)} <button className="ir-link" onClick={() => this.setState({ error: null })}>重试</button></div></div>
       )
     }
     return this.props.children
@@ -89,7 +89,7 @@ export function apply(ctx) {
   ctx.effect(() => {
     const disposers = []
     disposers.push(slots.inject('main', () => slots.register({ name: 'main', key: PANEL_ID }, PanelPage)))
-    disposers.push(slots.inject('sidebar.panellist', () => slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 60, label: () => '译读' }, PanelIcon)))
+    disposers.push(slots.inject('sidebar.panellist', () => slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 60, label: () => '阅读室' }, PanelIcon)))
     return () => { for (const d of disposers.splice(0)) { try { d() } catch { /* 忽略 */ } } }
   }, 'immersive-reader: 面板入口')
 }

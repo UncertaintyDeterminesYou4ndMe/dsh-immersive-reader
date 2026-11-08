@@ -1,7 +1,7 @@
 {
   "name": "dsh-immersive-reader",
   "version": "0.1.0",
-  "description": "译读：在 DeepSeek Harness 里用母语读原版书。导入 EPUB/TXT/Markdown，按章节由 LLM 精译（保留论证、语气与历史背景，附译注），点一下看原文。",
+  "description": "阅读室：在 DeepSeek Harness 里用母语读原版书。导入 EPUB/TXT/Markdown，按章节由 LLM 精译（保留论证、语气与历史背景，附译注），点一下看原文。",
   "type": "module",
   "main": "index.js",
   "exports": {

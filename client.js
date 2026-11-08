@@ -381,7 +381,7 @@ function Shelf({ settings, onOpen, onSettings }) {
     className: "ir-scroll"
   }, /* @__PURE__ */ import_react.default.createElement("div", {
     className: "ir-shelf"
-  }, /* @__PURE__ */ import_react.default.createElement("h1", null, "译读"), /* @__PURE__ */ import_react.default.createElement("p", {
+  }, /* @__PURE__ */ import_react.default.createElement("h1", null, "阅读室"), /* @__PURE__ */ import_react.default.createElement("p", {
     className: "ir-lead"
   }, "导入原版书或网页文章，按章节由模型精译，用母语读，点一下看原文；读不懂的地方选中就能追问。"), /* @__PURE__ */ import_react.default.createElement("div", {
     className: "ir-import"
@@ -2007,7 +2007,7 @@ class Boundary extends import_react4.default.Component {
         className: "ir-root"
       }, /* @__PURE__ */ import_react4.default.createElement("div", {
         className: "ir-error"
-      }, "译读界面出错：", String(this.state.error?.message ?? this.state.error), " ", /* @__PURE__ */ import_react4.default.createElement("button", {
+      }, "阅读室界面出错：", String(this.state.error?.message ?? this.state.error), " ", /* @__PURE__ */ import_react4.default.createElement("button", {
         className: "ir-link",
         onClick: () => this.setState({ error: null })
       }, "重试")));
@@ -2115,7 +2115,7 @@ function apply(ctx) {
   ctx.effect(() => {
     const disposers = [];
     disposers.push(slots.inject("main", () => slots.register({ name: "main", key: PANEL_ID }, PanelPage)));
-    disposers.push(slots.inject("sidebar.panellist", () => slots.register({ name: "sidebar.panellist", id: PANEL_ID, order: 60, label: () => "译读" }, PanelIcon)));
+    disposers.push(slots.inject("sidebar.panellist", () => slots.register({ name: "sidebar.panellist", id: PANEL_ID, order: 60, label: () => "阅读室" }, PanelIcon)));
     return () => {
       for (const d of disposers.splice(0)) {
         try {

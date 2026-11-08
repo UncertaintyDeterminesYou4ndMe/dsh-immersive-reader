@@ -58,7 +58,7 @@ export function Shelf({ settings, onOpen, onSettings }) {
   return (
     <div className="ir-scroll">
       <div className="ir-shelf">
-        <h1>译读</h1>
+        <h1>阅读室</h1>
         <p className="ir-lead">导入原版书或网页文章，按章节由模型精译，用母语读，点一下看原文；读不懂的地方选中就能追问。</p>
         <div className="ir-import">
           <button className="ir-primary" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>导入 EPUB / TXT / Markdown</button>

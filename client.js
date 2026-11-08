@@ -180,7 +180,7 @@ var CSS = `
 .ir-page { max-width: 44rem; margin: 0 auto; padding: 28px 24px 120px; font-family: var(--ir-serif); letter-spacing: .01em; }
 .ir-chapter-title { font-weight: normal; font-size: 1.5em; line-height: 1.4; margin: 0 0 6px; }
 .ir-chapter-sub { font-family: var(--ir-sans); font-size: 13px; color: var(--ir-fg-2); margin: 0 0 24px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.ir-intro { border-top: 1px solid var(--ir-line); border-bottom: 1px solid var(--ir-line); padding: 12px 0; margin: 0 0 28px; font-family: var(--ir-sans); font-size: .9em; line-height: 1.75; color: var(--ir-fg-2); }
+.ir-intro { position: relative; border-top: 1px solid var(--ir-line); border-bottom: 1px solid var(--ir-line); padding: 12px 0; margin: 0 0 28px; font-family: var(--ir-sans); font-size: .9em; line-height: 1.75; color: var(--ir-fg-2); }
 .ir-intro b { font-weight: normal; color: var(--ir-fg); margin-right: 8px; }
 .ir-intro p { margin: 6px 0 0; }
 .ir-para { margin: 0 0 1.1em; position: relative; }
@@ -904,11 +904,21 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   }, "译这一章") : null, busy ? /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-link",
     onClick: () => api.cancel(bookId).then(() => api.status(bookId)).then(setStatus).catch(() => {})
-  }, "停止") : null), chapter.index === 0 && book?.intro ? /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-intro"
-  }, /* @__PURE__ */ import_react2.default.createElement("b", null, "导读"), /* @__PURE__ */ import_react2.default.createElement("p", null, book.intro)) : null, chapter.intro ? /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-intro"
-  }, /* @__PURE__ */ import_react2.default.createElement("b", null, "本章导读"), /* @__PURE__ */ import_react2.default.createElement("p", null, chapter.intro)) : null, chapter.paragraphs.map((p) => /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, {
+  }, "停止") : null), chapter.index === 0 && book?.intro ? /* @__PURE__ */ import_react2.default.createElement(IntroBlock, {
+    label: "导读",
+    paraId: "intro:book",
+    text: book.intro,
+    asks: asksBy["intro:book"],
+    onAsk: (input) => doAsk("intro:book", input),
+    onRemoveAsk: removeAsk
+  }) : null, chapter.intro ? /* @__PURE__ */ import_react2.default.createElement(IntroBlock, {
+    label: "本章导读",
+    paraId: `intro:${chapter.id}`,
+    text: chapter.intro,
+    asks: asksBy[`intro:${chapter.id}`],
+    onAsk: (input) => doAsk(`intro:${chapter.id}`, input),
+    onRemoveAsk: removeAsk
+  }) : null, chapter.paragraphs.map((p) => /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, {
     key: p.id
   }, /* @__PURE__ */ import_react2.default.createElement(Paragraph, {
     p,
@@ -1157,24 +1167,8 @@ function AskList({ asks, asking, onRemove }) {
     className: "ir-pending"
   }, "思考中…")) : null);
 }
-function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
-  const hostRef = import_react2.useRef(null);
+function useSelectionPop(hostRef, locate) {
   const [selection, setSelection] = import_react2.useState(null);
-  const [showSrc, setShowSrc] = import_react2.useState(false);
-  const [editNote, setEditNote] = import_react2.useState(false);
-  const [noteDraft, setNoteDraft] = import_react2.useState(mark?.note ?? "");
-  const [showNote, setShowNote] = import_react2.useState(false);
-  const [retrans, setRetrans] = import_react2.useState(false);
-  const [instruction, setInstruction] = import_react2.useState("");
-  const [askOpen, setAskOpen] = import_react2.useState(false);
-  const [askSel, setAskSel] = import_react2.useState("");
-  const [askDraft, setAskDraft] = import_react2.useState("");
-  const [asking, setAsking] = import_react2.useState(null);
-  const [busy, setBusy] = import_react2.useState(false);
-  const [err, setErr] = import_react2.useState("");
-  const kindClass = `ir-para ir-${p.kind || "p"}${selection ? " ir-has-sel" : ""}${reading ? " ir-reading" : ""}`;
-  const isHeading = p.kind === "h1" || p.kind === "h2" || p.kind === "h3";
-  const isTable = p.kind === "table";
   const onMouseUp = () => {
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
@@ -1182,7 +1176,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
       setSelection(null);
       return;
     }
-    const where = p.zh && p.zh.includes(text) ? "zh" : p.text.includes(text) ? "src" : null;
+    const where = locate(text);
     if (!where) {
       setSelection(null);
       return;
@@ -1193,7 +1187,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
       return;
     setSelection({ text, where, x: Math.max(0, rect.left - host.left), y: rect.bottom - host.top + 4 });
   };
-  const clearSelection = () => {
+  const clear = () => {
     setSelection(null);
     try {
       window.getSelection()?.removeAllRanges();
@@ -1202,26 +1196,119 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
   const onTouchEnd = () => {
     setTimeout(onMouseUp, 350);
   };
-  const runAsk = async ({ selection: sel = "", question = "", kind }) => {
+  return { selection, onMouseUp, onTouchEnd, clear };
+}
+function useAsk(onAsk, placeholder) {
+  const [open, setOpen] = import_react2.useState(false);
+  const [sel, setSel] = import_react2.useState("");
+  const [draft, setDraft] = import_react2.useState("");
+  const [asking, setAsking] = import_react2.useState(null);
+  const [err, setErr] = import_react2.useState("");
+  const run = async ({ selection = "", question = "", kind }) => {
     setErr("");
-    setAsking({ label: ASK_LABEL[kind], detail: kind === "explain" ? `「${sel}」` : kind === "custom" ? question : "" });
+    setAsking({ label: ASK_LABEL[kind], detail: kind === "explain" ? `「${selection}」` : kind === "custom" ? question : "" });
     try {
-      await onAsk({ selection: sel, question, kind });
+      await onAsk({ selection, question, kind });
     } catch (e) {
       setErr(e.message);
     } finally {
       setAsking(null);
     }
   };
-  const submitAsk = () => {
-    const q = askDraft.trim();
+  const submit = () => {
+    const q = draft.trim();
     if (!q)
       return;
-    runAsk({ selection: askSel, question: q, kind: "custom" });
-    setAskOpen(false);
-    setAskDraft("");
-    setAskSel("");
+    run({ selection: sel, question: q, kind: "custom" });
+    setOpen(false);
+    setDraft("");
+    setSel("");
   };
+  const openFor = (text = "") => {
+    setSel(text);
+    setDraft("");
+    setOpen(true);
+  };
+  const toggle = () => {
+    setSel("");
+    setOpen((v) => !v);
+  };
+  const row = open ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-retrans",
+    onClick: (e) => e.stopPropagation()
+  }, /* @__PURE__ */ import_react2.default.createElement("input", {
+    placeholder: sel ? `关于「${sel.slice(0, 24)}」想问什么…` : placeholder,
+    value: draft,
+    onChange: (e) => setDraft(e.target.value),
+    onKeyDown: (e) => {
+      if (e.key === "Enter")
+        submit();
+      if (e.key === "Escape")
+        setOpen(false);
+    },
+    autoFocus: true
+  }), /* @__PURE__ */ import_react2.default.createElement("button", {
+    onClick: submit,
+    disabled: !draft.trim()
+  }, "问"), /* @__PURE__ */ import_react2.default.createElement("button", {
+    className: "ir-plain",
+    onClick: () => {
+      setOpen(false);
+      setSel("");
+    }
+  }, "取消")) : null;
+  return { asking, err, setErr, run, openFor, toggle, row };
+}
+function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
+  const hostRef = import_react2.useRef(null);
+  const { selection, onMouseUp, onTouchEnd, clear } = useSelectionPop(hostRef, (t) => text.includes(t) ? "zh" : null);
+  const ask = useAsk(onAsk, `对这段${label}想问什么…`);
+  return /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-intro",
+    "data-para": paraId,
+    ref: hostRef,
+    onMouseUp,
+    onTouchEnd
+  }, selection ? /* @__PURE__ */ import_react2.default.createElement("span", {
+    className: "ir-sel-pop",
+    style: { left: selection.x, top: selection.y },
+    onMouseUp: (e) => e.stopPropagation(),
+    onTouchEnd: (e) => e.stopPropagation(),
+    onClick: (e) => e.stopPropagation()
+  }, /* @__PURE__ */ import_react2.default.createElement("button", {
+    onClick: () => {
+      const t = selection.text;
+      clear();
+      ask.run({ selection: t, kind: "explain" });
+    }
+  }, "解释"), /* @__PURE__ */ import_react2.default.createElement("button", {
+    onClick: () => {
+      ask.openFor(selection.text);
+      clear();
+    }
+  }, "追问")) : null, /* @__PURE__ */ import_react2.default.createElement("b", null, label), /* @__PURE__ */ import_react2.default.createElement("p", null, text), ask.row, /* @__PURE__ */ import_react2.default.createElement(AskList, {
+    asks,
+    asking: ask.asking,
+    onRemove: onRemoveAsk
+  }), ask.err ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-note"
+  }, /* @__PURE__ */ import_react2.default.createElement("b", null, "错误"), ask.err) : null);
+}
+function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
+  const hostRef = import_react2.useRef(null);
+  const { selection, onMouseUp, onTouchEnd, clear: clearSelection } = useSelectionPop(hostRef, (text) => p.zh && p.zh.includes(text) ? "zh" : p.text.includes(text) ? "src" : null);
+  const ask = useAsk(onAsk, "对这一段想问什么…");
+  const { asking, err, setErr, run: runAsk } = ask;
+  const [showSrc, setShowSrc] = import_react2.useState(false);
+  const [editNote, setEditNote] = import_react2.useState(false);
+  const [noteDraft, setNoteDraft] = import_react2.useState(mark?.note ?? "");
+  const [showNote, setShowNote] = import_react2.useState(false);
+  const [retrans, setRetrans] = import_react2.useState(false);
+  const [instruction, setInstruction] = import_react2.useState("");
+  const [busy, setBusy] = import_react2.useState(false);
+  const kindClass = `ir-para ir-${p.kind || "p"}${selection ? " ir-has-sel" : ""}${reading ? " ir-reading" : ""}`;
+  const isHeading = p.kind === "h1" || p.kind === "h2" || p.kind === "h3";
+  const isTable = p.kind === "table";
   const doRetranslate = async () => {
     setBusy(true);
     setErr("");
@@ -1288,36 +1375,11 @@ ${p.zh}
     }
   }, "解释"), /* @__PURE__ */ import_react2.default.createElement("button", {
     onClick: () => {
-      setAskSel(selection.text);
-      setAskDraft("");
-      setAskOpen(true);
+      ask.openFor(selection.text);
       clearSelection();
     }
   }, "追问")) : null;
-  const askRow = askOpen ? /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-retrans",
-    onClick: (e) => e.stopPropagation()
-  }, /* @__PURE__ */ import_react2.default.createElement("input", {
-    placeholder: askSel ? `关于「${askSel.slice(0, 24)}」想问什么…` : "对这一段想问什么…",
-    value: askDraft,
-    onChange: (e) => setAskDraft(e.target.value),
-    onKeyDown: (e) => {
-      if (e.key === "Enter")
-        submitAsk();
-      if (e.key === "Escape")
-        setAskOpen(false);
-    },
-    autoFocus: true
-  }), /* @__PURE__ */ import_react2.default.createElement("button", {
-    onClick: submitAsk,
-    disabled: !askDraft.trim()
-  }, "问"), /* @__PURE__ */ import_react2.default.createElement("button", {
-    className: "ir-plain",
-    onClick: () => {
-      setAskOpen(false);
-      setAskSel("");
-    }
-  }, "取消")) : null;
+  const askRow = ask.row;
   const askList = /* @__PURE__ */ import_react2.default.createElement(AskList, {
     asks,
     asking,
@@ -1419,10 +1481,7 @@ ${p.zh}
     disabled: Boolean(asking)
   }, "这段在说什么"), /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-link",
-    onClick: () => {
-      setAskSel("");
-      setAskOpen((v) => !v);
-    }
+    onClick: ask.toggle
   }, "追问"), onRead ? /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-link",
     onClick: (e) => {

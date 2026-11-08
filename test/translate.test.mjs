@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LibraryStore } from '../lib/store.js'
-import { Translator, buildBatches, lookaheadTargets, parseBatchReply, extractJson } from '../lib/translate.js'
+import { Translator, buildBatches, lookaheadTargets, parseBatchReply, extractJson, introTarget } from '../lib/translate.js'
 
 const para = (id, text, kind = 'p') => ({ id, kind, text })
 const BOOK = {
@@ -240,5 +240,31 @@ test('addBook 可指定 id：同一链接重抓时覆盖同一本书并保留译
     assert.equal((await store.listBooks()).length, 1)
     assert.equal((await store.translations(first.id)).paragraphs.c1p1.zh, '甲')
     assert.equal(await store.findByUrl('https://x.test/none'), null)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('导读也能追问：intro:book / intro:<章> 走导读文本，提示里注明不是作者原文', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ir-ask-intro-'))
+  try {
+    const store = new LibraryStore(dir)
+    await store.init()
+    await store.addBook(Buffer.from('ask-intro'), { filename: 'b.txt', doc: BOOK })
+    const id = (await store.listBooks())[0].id
+    const calls = []
+    const ctx = fakeCtx(calls)
+    ctx.llm.stream = async function* (options) { calls.push(options); yield { type: 'text-delta', text: '导读回答。' }; yield { type: 'finish', reason: { kind: 'stop' } } }
+    const translator = new Translator({ ctx, store, logger: { info() {}, warn() {} } })
+    await assert.rejects(translator.ask(id, { paraId: 'intro:c1', selection: '巴比伦', kind: 'explain' }), /导读还没生成/)
+    await store.mergeTranslations(id, { intro: '全书讲巴比伦法典。', chapters: { c1: { intro: '本章从巴比伦石碑讲起。' } } })
+    const r = await translator.ask(id, { paraId: 'intro:c1', selection: '巴比伦石碑', kind: 'explain' })
+    assert.equal(r.answer, '导读回答。')
+    const text = calls[0].messages[0].content[0].text
+    assert.ok(text.includes('本章导读（') && text.includes('本章从巴比伦石碑讲起') && text.includes('「巴比伦石碑」'))
+    assert.ok(!text.includes('这一段原文'))
+    await translator.ask(id, { paraId: 'intro:book', question: '为什么从法典讲起？', kind: 'custom' })
+    const t2 = calls[1].messages[0].content[0].text
+    assert.ok(t2.includes('全书导读（') && t2.includes('全书讲巴比伦法典') && !t2.includes('背景：'))
+    assert.equal(introTarget(await store.book(id), await store.translations(id), 'c1p1'), null)
+    assert.equal(introTarget(await store.book(id), await store.translations(id), 'intro:book').chapter.id, 'c1')
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

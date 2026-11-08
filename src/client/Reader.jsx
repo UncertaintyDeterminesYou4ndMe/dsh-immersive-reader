@@ -306,8 +306,8 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
               {unfinished && !busy ? <button className="ir-link" onClick={translateChapter}>译这一章</button> : null}
               {busy ? <button className="ir-link" onClick={() => api.cancel(bookId).then(() => api.status(bookId)).then(setStatus).catch(() => {})}>停止</button> : null}
             </div>
-            {chapter.index === 0 && book?.intro ? <div className="ir-intro"><b>导读</b><p>{book.intro}</p></div> : null}
-            {chapter.intro ? <div className="ir-intro"><b>本章导读</b><p>{chapter.intro}</p></div> : null}
+            {chapter.index === 0 && book?.intro ? <IntroBlock label="导读" paraId="intro:book" text={book.intro} asks={asksBy['intro:book']} onAsk={input => doAsk('intro:book', input)} onRemoveAsk={removeAsk} /> : null}
+            {chapter.intro ? <IntroBlock label="本章导读" paraId={`intro:${chapter.id}`} text={chapter.intro} asks={asksBy[`intro:${chapter.id}`]} onAsk={input => doAsk(`intro:${chapter.id}`, input)} onRemoveAsk={removeAsk} /> : null}
             {chapter.paragraphs.map(p => (
               <React.Fragment key={p.id}>
                 <Paragraph
@@ -487,52 +487,92 @@ function AskList({ asks, asking, onRemove }) {
   )
 }
 
-function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
-  const hostRef = useRef(null)
-  const [selection, setSelection] = useState(null) // {text, where: 'zh' | 'src', x, y}
-  const [showSrc, setShowSrc] = useState(false)
-  const [editNote, setEditNote] = useState(false)
-  const [noteDraft, setNoteDraft] = useState(mark?.note ?? '')
-  const [showNote, setShowNote] = useState(false)
-  const [retrans, setRetrans] = useState(false)
-  const [instruction, setInstruction] = useState('')
-  const [askOpen, setAskOpen] = useState(false)
-  const [askSel, setAskSel] = useState('')
-  const [askDraft, setAskDraft] = useState('')
-  const [asking, setAsking] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const kindClass = `ir-para ir-${p.kind || 'p'}${selection ? ' ir-has-sel' : ''}${reading ? ' ir-reading' : ''}`
-  const isHeading = p.kind === 'h1' || p.kind === 'h2' || p.kind === 'h3'
-  const isTable = p.kind === 'table'
-
-  // 选中译文或原文里的一段文字：弹出「划线 / 解释 / 追问」
+/** 选中宿主元素里的文字时算出浮层位置。locate(text) 返回 'zh' | 'src' | null，null 表示不弹。 */
+function useSelectionPop(hostRef, locate) {
+  const [selection, setSelection] = useState(null) // {text, where, x, y}
   const onMouseUp = () => {
     const sel = window.getSelection()
     const text = sel ? sel.toString().trim() : ''
     if (!text || !sel || sel.rangeCount === 0 || text.length > 600) { setSelection(null); return }
-    const where = p.zh && p.zh.includes(text) ? 'zh' : p.text.includes(text) ? 'src' : null
+    const where = locate(text)
     if (!where) { setSelection(null); return }
     const host = hostRef.current?.getBoundingClientRect()
     const rect = sel.getRangeAt(0).getBoundingClientRect()
     if (!host) return
     setSelection({ text, where, x: Math.max(0, rect.left - host.left), y: rect.bottom - host.top + 4 })
   }
-  const clearSelection = () => { setSelection(null); try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ } }
+  const clear = () => { setSelection(null); try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ } }
   // 手机上长按选词没有 mouseup：touchend 之后等选区稳定再算
   const onTouchEnd = () => { setTimeout(onMouseUp, 350) }
+  return { selection, onMouseUp, onTouchEnd, clear }
+}
 
-  const runAsk = async ({ selection: sel = '', question = '', kind }) => {
+/** 追问的状态与输入行：run 直接问，openFor 打开输入行（可带选中的文字） */
+function useAsk(onAsk, placeholder) {
+  const [open, setOpen] = useState(false)
+  const [sel, setSel] = useState('')
+  const [draft, setDraft] = useState('')
+  const [asking, setAsking] = useState(null)
+  const [err, setErr] = useState('')
+  const run = async ({ selection = '', question = '', kind }) => {
     setErr('')
-    setAsking({ label: ASK_LABEL[kind], detail: kind === 'explain' ? `「${sel}」` : kind === 'custom' ? question : '' })
-    try { await onAsk({ selection: sel, question, kind }) } catch (e) { setErr(e.message) } finally { setAsking(null) }
+    setAsking({ label: ASK_LABEL[kind], detail: kind === 'explain' ? `「${selection}」` : kind === 'custom' ? question : '' })
+    try { await onAsk({ selection, question, kind }) } catch (e) { setErr(e.message) } finally { setAsking(null) }
   }
-  const submitAsk = () => {
-    const q = askDraft.trim()
+  const submit = () => {
+    const q = draft.trim()
     if (!q) return
-    runAsk({ selection: askSel, question: q, kind: 'custom' })
-    setAskOpen(false); setAskDraft(''); setAskSel('')
+    run({ selection: sel, question: q, kind: 'custom' })
+    setOpen(false); setDraft(''); setSel('')
   }
+  const openFor = (text = '') => { setSel(text); setDraft(''); setOpen(true) }
+  const toggle = () => { setSel(''); setOpen(v => !v) }
+  const row = open ? (
+    <div className="ir-retrans" onClick={e => e.stopPropagation()}>
+      <input placeholder={sel ? `关于「${sel.slice(0, 24)}」想问什么…` : placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setOpen(false) }} autoFocus />
+      <button onClick={submit} disabled={!draft.trim()}>问</button>
+      <button className="ir-plain" onClick={() => { setOpen(false); setSel('') }}>取消</button>
+    </div>
+  ) : null
+  return { asking, err, setErr, run, openFor, toggle, row }
+}
+
+/** 全书导读 / 本章导读：选中文字同样可以「解释 / 追问」，答案挂在导读下面 */
+function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
+  const hostRef = useRef(null)
+  const { selection, onMouseUp, onTouchEnd, clear } = useSelectionPop(hostRef, t => (text.includes(t) ? 'zh' : null))
+  const ask = useAsk(onAsk, `对这段${label}想问什么…`)
+  return (
+    <div className="ir-intro" data-para={paraId} ref={hostRef} onMouseUp={onMouseUp} onTouchEnd={onTouchEnd}>
+      {selection ? (
+        <span className="ir-sel-pop" style={{ left: selection.x, top: selection.y }} onMouseUp={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+          <button onClick={() => { const t = selection.text; clear(); ask.run({ selection: t, kind: 'explain' }) }}>解释</button>
+          <button onClick={() => { ask.openFor(selection.text); clear() }}>追问</button>
+        </span>
+      ) : null}
+      <b>{label}</b><p>{text}</p>
+      {ask.row}
+      <AskList asks={asks} asking={ask.asking} onRemove={onRemoveAsk} />
+      {ask.err ? <div className="ir-note"><b>错误</b>{ask.err}</div> : null}
+    </div>
+  )
+}
+
+function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
+  const hostRef = useRef(null)
+  const { selection, onMouseUp, onTouchEnd, clear: clearSelection } = useSelectionPop(hostRef, text => (p.zh && p.zh.includes(text) ? 'zh' : p.text.includes(text) ? 'src' : null))
+  const ask = useAsk(onAsk, '对这一段想问什么…')
+  const { asking, err, setErr, run: runAsk } = ask
+  const [showSrc, setShowSrc] = useState(false)
+  const [editNote, setEditNote] = useState(false)
+  const [noteDraft, setNoteDraft] = useState(mark?.note ?? '')
+  const [showNote, setShowNote] = useState(false)
+  const [retrans, setRetrans] = useState(false)
+  const [instruction, setInstruction] = useState('')
+  const [busy, setBusy] = useState(false)
+  const kindClass = `ir-para ir-${p.kind || 'p'}${selection ? ' ir-has-sel' : ''}${reading ? ' ir-reading' : ''}`
+  const isHeading = p.kind === 'h1' || p.kind === 'h2' || p.kind === 'h3'
+  const isTable = p.kind === 'table'
 
   const doRetranslate = async () => {
     setBusy(true); setErr('')
@@ -564,16 +604,10 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
     <span className="ir-sel-pop" style={{ left: selection.x, top: selection.y }} onMouseUp={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
       {selection.where === 'zh' && selection.text.length >= 2 ? <button onClick={() => { onMark({ addRange: selection.text }); clearSelection() }}>划线</button> : null}
       <button onClick={() => { const t = selection.text; clearSelection(); runAsk({ selection: t, kind: 'explain' }) }}>解释</button>
-      <button onClick={() => { setAskSel(selection.text); setAskDraft(''); setAskOpen(true); clearSelection() }}>追问</button>
+      <button onClick={() => { ask.openFor(selection.text); clearSelection() }}>追问</button>
     </span>
   ) : null
-  const askRow = askOpen ? (
-    <div className="ir-retrans" onClick={e => e.stopPropagation()}>
-      <input placeholder={askSel ? `关于「${askSel.slice(0, 24)}」想问什么…` : '对这一段想问什么…'} value={askDraft} onChange={e => setAskDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submitAsk(); if (e.key === 'Escape') setAskOpen(false) }} autoFocus />
-      <button onClick={submitAsk} disabled={!askDraft.trim()}>问</button>
-      <button className="ir-plain" onClick={() => { setAskOpen(false); setAskSel('') }}>取消</button>
-    </div>
-  ) : null
+  const askRow = ask.row
   const askList = <AskList asks={asks} asking={asking} onRemove={onRemoveAsk} />
 
   if (display === 'original') {
@@ -611,7 +645,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
       {showSrc && display === 'zh' && p.zh ? (
         <div className="ir-para-tools">
           <button className="ir-link" onClick={() => runAsk({ kind: 'intent' })} disabled={Boolean(asking)}>这段在说什么</button>
-          <button className="ir-link" onClick={() => { setAskSel(''); setAskOpen(v => !v) }}>追问</button>
+          <button className="ir-link" onClick={ask.toggle}>追问</button>
           {onRead ? <button className="ir-link" onClick={e => { e.stopPropagation(); onRead() }}>从这段朗读</button> : null}
           <button className="ir-link" onClick={() => setRetrans(v => !v)}>重译</button>
           <button className="ir-link" onClick={() => onMark({ highlight: !mark?.highlight })}>{mark?.highlight ? '取消划线' : '划线'}</button>

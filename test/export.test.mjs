@@ -51,3 +51,18 @@ test('safeName 超长按词边界截断', () => {
   const name = safeName('Competitive Advantage of Nations: Creating and Sustaining Superior Performance')
   assert.ok(name.length <= 60 && !name.endsWith('Sup') && name.endsWith('Sustaining'))
 })
+
+test('notesMarkdown：导读上的追问排在对应章节最前', () => {
+  const book = { title: 'B', chapters: [{ id: 'c1', title: 'One', paragraphs: [{ id: 'c1p1', text: 'Alpha' }] }, { id: 'c2', title: 'Two', paragraphs: [{ id: 'c2p1', text: 'Beta' }] }] }
+  const trans = { paragraphs: { c1p1: { zh: '甲' }, c2p1: { zh: '乙' } }, chapters: {} }
+  const asks = [
+    { paraId: 'intro:c2', selection: '石碑', kind: 'explain', answer: '石碑的回答' },
+    { paraId: 'intro:book', question: '为什么？', kind: 'custom', answer: '全书回答' },
+    { paraId: 'c2p1', kind: 'intent', answer: '段落回答' },
+  ]
+  const { markdown, count } = notesMarkdown(book, trans, {}, asks)
+  assert.equal(count, 3)
+  const one = markdown.indexOf('## One'), two = markdown.indexOf('## Two')
+  assert.ok(one >= 0 && markdown.indexOf('全书回答') > one && markdown.indexOf('全书回答') < two)
+  assert.ok(markdown.indexOf('**本章导读**') > two && markdown.indexOf('石碑的回答') < markdown.indexOf('段落回答'))
+})

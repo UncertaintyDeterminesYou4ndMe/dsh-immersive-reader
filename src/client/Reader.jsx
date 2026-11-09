@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api, API_BASE } from './api.js'
 import { askAgent } from './host.js'
 
@@ -661,24 +661,107 @@ function AskPending({ asking }) {
   return <div className="ir-note ir-ask" onClick={e => e.stopPropagation()}><b>{asking.label}</b>{asking.detail ? <i className="ir-ask-q">{asking.detail}</i> : null}<span className="ir-pending">思考中…</span></div>
 }
 
-/** 选中宿主元素里的文字时算出浮层位置。locate(text) 返回 'zh' | 'src' | null，null 表示不弹。 */
-function useSelectionPop(hostRef, locate) {
-  const [selection, setSelection] = useState(null) // {text, where, x, y}
-  const onMouseUp = () => {
-    const sel = window.getSelection()
-    const text = sel ? sel.toString().trim() : ''
-    if (!text || !sel || sel.rangeCount === 0 || text.length > 600) { setSelection(null); return }
-    const where = locate(text)
-    if (!where) { setSelection(null); return }
+/** 选区里的纯文字：去掉「问」「注」、脚注编号这些装饰，免得和段落原文对不上 */
+function selectedText(host) {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return ''
+  const range = sel.getRangeAt(0)
+  if (host && !range.intersectsNode(host)) return ''
+  const frag = range.cloneContents()
+  frag.querySelectorAll('.ir-ask-mark, .ir-note-mark, .ir-fn, .ir-sel-pop, .ir-ctx, button').forEach(n => n.remove())
+  return (frag.textContent || '').trim()
+}
+
+function clearSelection() { try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ } }
+
+/**
+ * 段落上的文字菜单。电脑上是右键菜单：右键按下时阻止浏览器改选区（mac 会自动选中光标下的词），
+ * 弹出时读当时的选区；有选区给「划线 / 解释 / 追问 / 复制」，没有就给整段的操作。
+ * 手机上没有右键：长按选词后照旧在选区下方弹浮层。locate(text) 返回 'zh' | 'src' | null。
+ */
+function useTextMenu(hostRef, locate) {
+  const [selection, setSelection] = useState(null) // 手机浮层 {text, where, x, y}
+  const [menu, setMenu] = useState(null) // 右键菜单 {x, y, text, where}
+  const menuRef = useRef(null)
+  const lastTouch = useRef(0)
+  const onMouseDown = e => { if (e.button === 2 || (e.button === 0 && e.ctrlKey)) e.preventDefault() }
+  const onContextMenu = e => {
+    if (Date.now() - lastTouch.current < 1500) return
     const host = hostRef.current?.getBoundingClientRect()
-    const rect = sel.getRangeAt(0).getBoundingClientRect()
     if (!host) return
+    e.preventDefault()
+    const text = selectedText(hostRef.current)
+    setSelection(null)
+    setMenu({ x: Math.max(0, Math.min(e.clientX - host.left, host.width - 168)), y: e.clientY - host.top + 2, text, where: text ? locate(text) : null })
+  }
+  const closeMenu = useCallback(() => setMenu(null), [])
+  useEffect(() => {
+    if (!menu) return
+    // 点菜单外面只关菜单，这一下不再落到下面的元素上（和系统菜单一样）
+    const onDown = ev => {
+      if (ev.composedPath().includes(menuRef.current)) return
+      setMenu(null)
+      if (ev.button !== 0) return
+      const swallow = e => { e.stopPropagation(); e.preventDefault() }
+      document.addEventListener('click', swallow, { capture: true, once: true })
+      setTimeout(() => document.removeEventListener('click', swallow, true), 600)
+    }
+    const onKey = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); setMenu(null) } }
+    const onClose = () => setMenu(null)
+    document.addEventListener('mousedown', onDown, true)
+    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('scroll', onClose, true)
+    window.addEventListener('blur', onClose)
+    window.addEventListener('resize', onClose)
+    return () => {
+      document.removeEventListener('mousedown', onDown, true)
+      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('scroll', onClose, true)
+      window.removeEventListener('blur', onClose)
+      window.removeEventListener('resize', onClose)
+    }
+  }, [menu])
+  // 靠近窗口底部时往上翻
+  useLayoutEffect(() => {
+    const el = menuRef.current
+    if (!el || !menu) return
+    const r = el.getBoundingClientRect()
+    if (r.bottom > window.innerHeight - 8) el.style.top = `${Math.max(0, menu.y - r.height - 4)}px`
+  }, [menu])
+  const popFromTouch = () => {
+    const sel = window.getSelection()
+    const text = selectedText(hostRef.current)
+    if (!text || text.length > 600) { setSelection(null); return }
+    const where = locate(text)
+    const host = hostRef.current?.getBoundingClientRect()
+    if (!where || !host) { setSelection(null); return }
+    const rect = sel.getRangeAt(0).getBoundingClientRect()
     setSelection({ text, where, x: Math.max(0, rect.left - host.left), y: rect.bottom - host.top + 4 })
   }
-  const clear = () => { setSelection(null); try { window.getSelection()?.removeAllRanges() } catch { /* 忽略 */ } }
-  // 手机上长按选词没有 mouseup：touchend 之后等选区稳定再算
-  const onTouchEnd = () => { setTimeout(onMouseUp, 350) }
-  return { selection, onMouseUp, onTouchEnd, clear }
+  const clear = () => { setSelection(null); setMenu(null); clearSelection() }
+  const handlers = {
+    onMouseDown,
+    onContextMenu,
+    onTouchStart: () => { lastTouch.current = Date.now() },
+    onTouchEnd: () => { lastTouch.current = Date.now(); setTimeout(popFromTouch, 350) },
+  }
+  return { selection, menu, menuRef, closeMenu, handlers, clear }
+}
+
+/** 右键菜单本体。items 里 '-' 是分隔线，null 跳过。 */
+function TextMenu({ menu, menuRef, items, onClose }) {
+  if (!menu) return null
+  const list = items.filter(Boolean).filter((it, i, a) => it !== '-' || (i > 0 && i < a.length - 1 && a[i - 1] !== '-'))
+  return (
+    <div className="ir-ctx" ref={menuRef} role="menu" style={{ left: menu.x, top: menu.y }} onMouseUp={e => e.stopPropagation()} onClick={e => e.stopPropagation()} onContextMenu={e => { e.preventDefault(); e.stopPropagation() }}>
+      {menu.text ? <div className="ir-ctx-head">「{menu.text.length > 16 ? `${menu.text.slice(0, 16)}…` : menu.text}」</div> : null}
+      {list.map((it, i) => it === '-' ? <hr key={i} /> : <button key={i} role="menuitem" onMouseDown={e => e.preventDefault()} onClick={() => { onClose(); it.run() }}>{it.label}</button>)}
+    </div>
+  )
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text) } catch { try { document.execCommand('copy') } catch { /* 忽略 */ } }
 }
 
 /** 追问的状态与输入行：run 直接问，openFor 打开输入行（可带选中的文字） */
@@ -714,18 +797,29 @@ function useAsk(onAsk, placeholder, onDone) {
 /** 全书导读 / 本章导读：选中文字同样可以「解释 / 追问」，答案挂在导读下面 */
 function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
   const hostRef = useRef(null)
-  const { selection, onMouseUp, onTouchEnd, clear } = useSelectionPop(hostRef, t => (text.includes(t) ? 'zh' : null))
+  const { selection, menu, menuRef, closeMenu, handlers, clear } = useTextMenu(hostRef, t => (text.includes(t) ? 'zh' : null))
   const ctl = useAskCard(hostRef)
   const ask = useAsk(onAsk, `对这段${label}想问什么…`, item => ctl.openFor(item.id))
   const { groups, rest } = splitAsks(text, asks)
+  const sel = menu?.text
+  const menuItems = sel ? [
+    sel.length <= 600 ? { label: '解释', run: () => { clear(); ask.run({ selection: sel, kind: 'explain' }) } } : null,
+    sel.length <= 600 ? { label: '追问…', run: () => { ask.openFor(sel); clear() } } : null,
+    '-',
+    { label: '复制', run: () => copyText(sel) },
+  ] : [
+    { label: `追问这段${label}…`, run: () => ask.openFor('') },
+    { label: `复制${label}`, run: () => copyText(text) },
+  ]
   return (
-    <div className="ir-intro" data-para={paraId} ref={hostRef} onMouseUp={onMouseUp} onTouchEnd={onTouchEnd}>
+    <div className="ir-intro" data-para={paraId} ref={hostRef} {...handlers}>
       {selection ? (
         <span className="ir-sel-pop" style={{ left: selection.x, top: selection.y }} onMouseUp={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
           <button onClick={() => { const t = selection.text; clear(); ask.run({ selection: t, kind: 'explain' }) }}>解释</button>
           <button onClick={() => { ask.openFor(selection.text); clear() }}>追问</button>
         </span>
       ) : null}
+      <TextMenu menu={menu} menuRef={menuRef} items={menuItems} onClose={closeMenu} />
       <b>{label}</b><p><Annotated text={text} groups={groups} ctl={ctl} /><AskMark asks={rest} ctl={ctl} /></p>
       <AskCard ctl={ctl} asks={asks} onRemove={onRemoveAsk} />
       {ask.row}
@@ -737,7 +831,7 @@ function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
 
 function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
   const hostRef = useRef(null)
-  const { selection, onMouseUp, onTouchEnd, clear: clearSelection } = useSelectionPop(hostRef, text => (p.zh && p.zh.includes(text) ? 'zh' : p.text.includes(text) ? 'src' : null))
+  const { selection, menu, menuRef, closeMenu, handlers, clear: clearSelection } = useTextMenu(hostRef, text => (p.zh && p.zh.includes(text) ? 'zh' : p.text.includes(text) ? 'src' : null))
   const ctl = useAskCard(hostRef)
   const ask = useAsk(onAsk, '对这一段想问什么…', item => ctl.openFor(item.id))
   const { asking, err, setErr, run: runAsk } = ask
@@ -751,7 +845,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
   const [retrans, setRetrans] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
-  const kindClass = `ir-para ir-${p.kind || 'p'}${selection ? ' ir-has-sel' : ''}${reading ? ' ir-reading' : ''}${mark?.bookmark ? ' ir-bookmarked' : ''}`
+  const kindClass = `ir-para ir-${p.kind || 'p'}${selection || menu ? ' ir-has-sel' : ''}${reading ? ' ir-reading' : ''}${mark?.bookmark ? ' ir-bookmarked' : ''}`
   const isHeading = p.kind === 'h1' || p.kind === 'h2' || p.kind === 'h3'
   const isTable = p.kind === 'table'
 
@@ -788,13 +882,39 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
       <button onClick={() => { ask.openFor(selection.text); clearSelection() }}>追问</button>
     </span>
   ) : null
+  const sel = menu?.text
+  const zhShown = Boolean(p.zh) && display !== 'original'
+  const menuItems = sel ? [
+    menu.where === 'zh' && sel.length >= 2 ? { label: '划线', run: () => { onMark({ addRange: sel }); clearSelection() } } : null,
+    sel.length <= 600 ? { label: '解释', run: () => { clearSelection(); runAsk({ selection: sel, kind: 'explain' }) } } : null,
+    sel.length <= 600 ? { label: '追问…', run: () => { ask.openFor(sel); clearSelection() } } : null,
+    '-',
+    { label: '复制', run: () => copyText(sel) },
+  ] : [
+    { label: '这段在说什么', run: () => { if (!asking) runAsk({ kind: 'intent' }) } },
+    { label: '追问这段…', run: () => ask.openFor('') },
+    onRead ? { label: '从这段朗读', run: () => onRead() } : null,
+    '-',
+    zhShown ? { label: mark?.highlight ? '取消整段划线' : '整段划线', run: () => onMark({ highlight: !mark?.highlight }) } : null,
+    { label: mark?.note ? '改笔记' : '写笔记', run: () => { setNoteDraft(mark?.note ?? ''); setEditNote(true) } },
+    { label: mark?.bookmark ? '取消书签' : '加书签', run: () => onMark({ bookmark: !mark?.bookmark }) },
+    '-',
+    display === 'zh' && p.zh ? { label: showSrc ? '收起原文' : '看原文', run: () => setShowSrc(v => !v) } : null,
+    p.note ? { label: showNote ? '收起译注' : '看译注', run: () => setShowNote(v => !v) } : null,
+    p.zh ? { label: '重译这段…', run: () => setRetrans(true) } : null,
+    { label: '开会话问', run: askInChat },
+    '-',
+    { label: '复制这段', run: () => copyText(zhShown ? p.zh : p.text) },
+  ]
+  const textMenu = <TextMenu menu={menu} menuRef={menuRef} items={menuItems} onClose={closeMenu} />
   const askRow = ask.row
   const askList = <><AskCard ctl={ctl} asks={asks} onRemove={onRemoveAsk} /><AskPending asking={asking} /></>
 
   if (display === 'original') {
     return (
-      <div className={kindClass} data-para={p.id} ref={hostRef} onMouseUp={onMouseUp} onTouchEnd={onTouchEnd}>
+      <div className={kindClass} data-para={p.id} ref={hostRef} {...handlers}>
         {popover}
+        {textMenu}
         {isTable ? <><TableView text={p.text} header={p.header} /><AskMark asks={askRest} ctl={ctl} /></> : <div className="ir-src"><Annotated text={p.text} groups={askGroups} ctl={ctl} /><AskMark asks={askRest} ctl={ctl} />{(p.notes ?? []).filter(n => n.paraId).map((n, i) => <Footnote key={i} bookId={bookId} note={n} />)}</div>}
         {askRow}
         {askList}
@@ -804,10 +924,11 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
   }
   const srcVisible = display === 'bilingual' || showSrc || !p.zh
   return (
-    <div className={kindClass} data-para={p.id} ref={hostRef} onMouseUp={onMouseUp} onTouchEnd={onTouchEnd}>
+    <div className={kindClass} data-para={p.id} ref={hostRef} {...handlers}>
       {popover}
+      {textMenu}
       {p.zh ? (
-        <div className={`ir-zh${mark?.highlight ? ' ir-hl' : ''}`} onClick={() => { if (display === 'zh' && !selection) setShowSrc(v => !v) }}>
+        <div className={`ir-zh${mark?.highlight ? ' ir-hl' : ''}`} onClick={() => { if (display === 'zh' && !selection && !window.getSelection()?.toString()) setShowSrc(v => !v) }}>
           {isTable ? <TableView text={p.zh} header={p.header} /> : <Annotated text={p.zh} ranges={mark?.ranges} onRemove={r => onMark({ removeRange: r })} groups={askGroups} ctl={ctl} />}
           {p.note ? <span className="ir-note-mark" onClick={e => { e.stopPropagation(); setShowNote(v => !v) }}>注</span> : null}
           <AskMark asks={askRest} ctl={ctl} />

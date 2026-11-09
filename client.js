@@ -229,6 +229,11 @@ var CSS = `
 .ir-root .ir-sel-pop button { border: none; border-radius: 0; padding: 7px 10px; color: var(--ir-accent); }
 .ir-root .ir-sel-pop button + button { border-left: 1px solid var(--ir-line); }
 .ir-root .ir-sel-pop button:hover { background: var(--ir-bg-2); }
+.ir-ctx { position: absolute; z-index: 6; min-width: 150px; padding: 4px 0; font-family: var(--ir-sans); font-size: 13px; line-height: 1.4; background: var(--ir-bg); border: 1px solid var(--ir-fg-3); user-select: none; }
+.ir-ctx-head { padding: 4px 14px 6px; font-size: 12px; color: var(--ir-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.ir-root .ir-ctx button { display: block; width: 100%; text-align: left; border: none; border-radius: 0; padding: 5px 14px; background: none; color: var(--ir-fg); font: inherit; cursor: default; }
+.ir-root .ir-ctx button:hover { background: var(--ir-bg-2); }
+.ir-ctx hr { border: none; border-top: 1px solid var(--ir-line); margin: 4px 0; }
 .ir-ask { border-left-color: var(--ir-fg-2); white-space: pre-wrap; }
 .ir-ask-anchor { text-decoration: underline dotted; text-decoration-color: var(--ir-fg-3); text-decoration-thickness: 1px; text-underline-offset: 5px; cursor: pointer; }
 .ir-ask-anchor:hover, .ir-ask-anchor.ir-on { text-decoration-color: var(--ir-accent); }
@@ -1443,36 +1448,158 @@ function AskPending({ asking }) {
     className: "ir-pending"
   }, "思考中…"));
 }
-function useSelectionPop(hostRef, locate) {
+function selectedText(host) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed)
+    return "";
+  const range = sel.getRangeAt(0);
+  if (host && !range.intersectsNode(host))
+    return "";
+  const frag = range.cloneContents();
+  frag.querySelectorAll(".ir-ask-mark, .ir-note-mark, .ir-fn, .ir-sel-pop, .ir-ctx, button").forEach((n) => n.remove());
+  return (frag.textContent || "").trim();
+}
+function clearSelection() {
+  try {
+    window.getSelection()?.removeAllRanges();
+  } catch {}
+}
+function useTextMenu(hostRef, locate) {
   const [selection, setSelection] = import_react2.useState(null);
-  const onMouseUp = () => {
+  const [menu, setMenu] = import_react2.useState(null);
+  const menuRef = import_react2.useRef(null);
+  const lastTouch = import_react2.useRef(0);
+  const onMouseDown = (e) => {
+    if (e.button === 2 || e.button === 0 && e.ctrlKey)
+      e.preventDefault();
+  };
+  const onContextMenu = (e) => {
+    if (Date.now() - lastTouch.current < 1500)
+      return;
+    const host = hostRef.current?.getBoundingClientRect();
+    if (!host)
+      return;
+    e.preventDefault();
+    const text = selectedText(hostRef.current);
+    setSelection(null);
+    setMenu({ x: Math.max(0, Math.min(e.clientX - host.left, host.width - 168)), y: e.clientY - host.top + 2, text, where: text ? locate(text) : null });
+  };
+  const closeMenu = import_react2.useCallback(() => setMenu(null), []);
+  import_react2.useEffect(() => {
+    if (!menu)
+      return;
+    const onDown = (ev) => {
+      if (ev.composedPath().includes(menuRef.current))
+        return;
+      setMenu(null);
+      if (ev.button !== 0)
+        return;
+      const swallow = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+      };
+      document.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener("click", swallow, true), 600);
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Escape") {
+        ev.stopPropagation();
+        setMenu(null);
+      }
+    };
+    const onClose = () => setMenu(null);
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("scroll", onClose, true);
+    window.addEventListener("blur", onClose);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("blur", onClose);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [menu]);
+  import_react2.useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el || !menu)
+      return;
+    const r = el.getBoundingClientRect();
+    if (r.bottom > window.innerHeight - 8)
+      el.style.top = `${Math.max(0, menu.y - r.height - 4)}px`;
+  }, [menu]);
+  const popFromTouch = () => {
     const sel = window.getSelection();
-    const text = sel ? sel.toString().trim() : "";
-    if (!text || !sel || sel.rangeCount === 0 || text.length > 600) {
+    const text = selectedText(hostRef.current);
+    if (!text || text.length > 600) {
       setSelection(null);
       return;
     }
     const where = locate(text);
-    if (!where) {
+    const host = hostRef.current?.getBoundingClientRect();
+    if (!where || !host) {
       setSelection(null);
       return;
     }
-    const host = hostRef.current?.getBoundingClientRect();
     const rect = sel.getRangeAt(0).getBoundingClientRect();
-    if (!host)
-      return;
     setSelection({ text, where, x: Math.max(0, rect.left - host.left), y: rect.bottom - host.top + 4 });
   };
   const clear = () => {
     setSelection(null);
+    setMenu(null);
+    clearSelection();
+  };
+  const handlers = {
+    onMouseDown,
+    onContextMenu,
+    onTouchStart: () => {
+      lastTouch.current = Date.now();
+    },
+    onTouchEnd: () => {
+      lastTouch.current = Date.now();
+      setTimeout(popFromTouch, 350);
+    }
+  };
+  return { selection, menu, menuRef, closeMenu, handlers, clear };
+}
+function TextMenu({ menu, menuRef, items, onClose }) {
+  if (!menu)
+    return null;
+  const list = items.filter(Boolean).filter((it, i, a) => it !== "-" || i > 0 && i < a.length - 1 && a[i - 1] !== "-");
+  return /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-ctx",
+    ref: menuRef,
+    role: "menu",
+    style: { left: menu.x, top: menu.y },
+    onMouseUp: (e) => e.stopPropagation(),
+    onClick: (e) => e.stopPropagation(),
+    onContextMenu: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, menu.text ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-ctx-head"
+  }, "「", menu.text.length > 16 ? `${menu.text.slice(0, 16)}…` : menu.text, "」") : null, list.map((it, i) => it === "-" ? /* @__PURE__ */ import_react2.default.createElement("hr", {
+    key: i
+  }) : /* @__PURE__ */ import_react2.default.createElement("button", {
+    key: i,
+    role: "menuitem",
+    onMouseDown: (e) => e.preventDefault(),
+    onClick: () => {
+      onClose();
+      it.run();
+    }
+  }, it.label)));
+}
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
     try {
-      window.getSelection()?.removeAllRanges();
+      document.execCommand("copy");
     } catch {}
-  };
-  const onTouchEnd = () => {
-    setTimeout(onMouseUp, 350);
-  };
-  return { selection, onMouseUp, onTouchEnd, clear };
+  }
 }
 function useAsk(onAsk, placeholder, onDone) {
   const [open, setOpen] = import_react2.useState(false);
@@ -1539,16 +1666,31 @@ function useAsk(onAsk, placeholder, onDone) {
 }
 function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
   const hostRef = import_react2.useRef(null);
-  const { selection, onMouseUp, onTouchEnd, clear } = useSelectionPop(hostRef, (t) => text.includes(t) ? "zh" : null);
+  const { selection, menu, menuRef, closeMenu, handlers, clear } = useTextMenu(hostRef, (t) => text.includes(t) ? "zh" : null);
   const ctl = useAskCard(hostRef);
   const ask = useAsk(onAsk, `对这段${label}想问什么…`, (item) => ctl.openFor(item.id));
   const { groups, rest } = splitAsks(text, asks);
+  const sel = menu?.text;
+  const menuItems = sel ? [
+    sel.length <= 600 ? { label: "解释", run: () => {
+      clear();
+      ask.run({ selection: sel, kind: "explain" });
+    } } : null,
+    sel.length <= 600 ? { label: "追问…", run: () => {
+      ask.openFor(sel);
+      clear();
+    } } : null,
+    "-",
+    { label: "复制", run: () => copyText(sel) }
+  ] : [
+    { label: `追问这段${label}…`, run: () => ask.openFor("") },
+    { label: `复制${label}`, run: () => copyText(text) }
+  ];
   return /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-intro",
     "data-para": paraId,
     ref: hostRef,
-    onMouseUp,
-    onTouchEnd
+    ...handlers
   }, selection ? /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-sel-pop",
     style: { left: selection.x, top: selection.y },
@@ -1566,7 +1708,12 @@ function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
       ask.openFor(selection.text);
       clear();
     }
-  }, "追问")) : null, /* @__PURE__ */ import_react2.default.createElement("b", null, label), /* @__PURE__ */ import_react2.default.createElement("p", null, /* @__PURE__ */ import_react2.default.createElement(Annotated, {
+  }, "追问")) : null, /* @__PURE__ */ import_react2.default.createElement(TextMenu, {
+    menu,
+    menuRef,
+    items: menuItems,
+    onClose: closeMenu
+  }), /* @__PURE__ */ import_react2.default.createElement("b", null, label), /* @__PURE__ */ import_react2.default.createElement("p", null, /* @__PURE__ */ import_react2.default.createElement(Annotated, {
     text,
     groups,
     ctl
@@ -1585,7 +1732,7 @@ function IntroBlock({ label, paraId, text, asks, onAsk, onRemoveAsk }) {
 }
 function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onRead, onMark, onUpdated, onAsk, onRemoveAsk }) {
   const hostRef = import_react2.useRef(null);
-  const { selection, onMouseUp, onTouchEnd, clear: clearSelection } = useSelectionPop(hostRef, (text) => p.zh && p.zh.includes(text) ? "zh" : p.text.includes(text) ? "src" : null);
+  const { selection, menu, menuRef, closeMenu, handlers, clear: clearSelection2 } = useTextMenu(hostRef, (text) => p.zh && p.zh.includes(text) ? "zh" : p.text.includes(text) ? "src" : null);
   const ctl = useAskCard(hostRef);
   const ask = useAsk(onAsk, "对这一段想问什么…", (item) => ctl.openFor(item.id));
   const { asking, err, setErr, run: runAsk } = ask;
@@ -1598,7 +1745,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
   const [retrans, setRetrans] = import_react2.useState(false);
   const [instruction, setInstruction] = import_react2.useState("");
   const [busy, setBusy] = import_react2.useState(false);
-  const kindClass = `ir-para ir-${p.kind || "p"}${selection ? " ir-has-sel" : ""}${reading ? " ir-reading" : ""}${mark?.bookmark ? " ir-bookmarked" : ""}`;
+  const kindClass = `ir-para ir-${p.kind || "p"}${selection || menu ? " ir-has-sel" : ""}${reading ? " ir-reading" : ""}${mark?.bookmark ? " ir-bookmarked" : ""}`;
   const isHeading = p.kind === "h1" || p.kind === "h2" || p.kind === "h3";
   const isTable = p.kind === "table";
   const doRetranslate = async () => {
@@ -1657,20 +1804,65 @@ ${p.zh}
   }, selection.where === "zh" && selection.text.length >= 2 ? /* @__PURE__ */ import_react2.default.createElement("button", {
     onClick: () => {
       onMark({ addRange: selection.text });
-      clearSelection();
+      clearSelection2();
     }
   }, "划线") : null, /* @__PURE__ */ import_react2.default.createElement("button", {
     onClick: () => {
       const t = selection.text;
-      clearSelection();
+      clearSelection2();
       runAsk({ selection: t, kind: "explain" });
     }
   }, "解释"), /* @__PURE__ */ import_react2.default.createElement("button", {
     onClick: () => {
       ask.openFor(selection.text);
-      clearSelection();
+      clearSelection2();
     }
   }, "追问")) : null;
+  const sel = menu?.text;
+  const zhShown = Boolean(p.zh) && display !== "original";
+  const menuItems = sel ? [
+    menu.where === "zh" && sel.length >= 2 ? { label: "划线", run: () => {
+      onMark({ addRange: sel });
+      clearSelection2();
+    } } : null,
+    sel.length <= 600 ? { label: "解释", run: () => {
+      clearSelection2();
+      runAsk({ selection: sel, kind: "explain" });
+    } } : null,
+    sel.length <= 600 ? { label: "追问…", run: () => {
+      ask.openFor(sel);
+      clearSelection2();
+    } } : null,
+    "-",
+    { label: "复制", run: () => copyText(sel) }
+  ] : [
+    { label: "这段在说什么", run: () => {
+      if (!asking)
+        runAsk({ kind: "intent" });
+    } },
+    { label: "追问这段…", run: () => ask.openFor("") },
+    onRead ? { label: "从这段朗读", run: () => onRead() } : null,
+    "-",
+    zhShown ? { label: mark?.highlight ? "取消整段划线" : "整段划线", run: () => onMark({ highlight: !mark?.highlight }) } : null,
+    { label: mark?.note ? "改笔记" : "写笔记", run: () => {
+      setNoteDraft(mark?.note ?? "");
+      setEditNote(true);
+    } },
+    { label: mark?.bookmark ? "取消书签" : "加书签", run: () => onMark({ bookmark: !mark?.bookmark }) },
+    "-",
+    display === "zh" && p.zh ? { label: showSrc ? "收起原文" : "看原文", run: () => setShowSrc((v) => !v) } : null,
+    p.note ? { label: showNote ? "收起译注" : "看译注", run: () => setShowNote((v) => !v) } : null,
+    p.zh ? { label: "重译这段…", run: () => setRetrans(true) } : null,
+    { label: "开会话问", run: askInChat },
+    "-",
+    { label: "复制这段", run: () => copyText(zhShown ? p.zh : p.text) }
+  ];
+  const textMenu = /* @__PURE__ */ import_react2.default.createElement(TextMenu, {
+    menu,
+    menuRef,
+    items: menuItems,
+    onClose: closeMenu
+  });
   const askRow = ask.row;
   const askList = /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, /* @__PURE__ */ import_react2.default.createElement(AskCard, {
     ctl,
@@ -1684,9 +1876,8 @@ ${p.zh}
       className: kindClass,
       "data-para": p.id,
       ref: hostRef,
-      onMouseUp,
-      onTouchEnd
-    }, popover, isTable ? /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, /* @__PURE__ */ import_react2.default.createElement(TableView, {
+      ...handlers
+    }, popover, textMenu, isTable ? /* @__PURE__ */ import_react2.default.createElement(import_react2.default.Fragment, null, /* @__PURE__ */ import_react2.default.createElement(TableView, {
       text: p.text,
       header: p.header
     }), /* @__PURE__ */ import_react2.default.createElement(AskMark, {
@@ -1714,12 +1905,11 @@ ${p.zh}
     className: kindClass,
     "data-para": p.id,
     ref: hostRef,
-    onMouseUp,
-    onTouchEnd
-  }, popover, p.zh ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    ...handlers
+  }, popover, textMenu, p.zh ? /* @__PURE__ */ import_react2.default.createElement("div", {
     className: `ir-zh${mark?.highlight ? " ir-hl" : ""}`,
     onClick: () => {
-      if (display === "zh" && !selection)
+      if (display === "zh" && !selection && !window.getSelection()?.toString())
         setShowSrc((v) => !v);
     }
   }, isTable ? /* @__PURE__ */ import_react2.default.createElement(TableView, {

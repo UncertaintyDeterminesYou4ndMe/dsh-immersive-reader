@@ -112,6 +112,11 @@ export const CSS = `
 .ir-root .ir-sel-pop button { border: none; border-radius: 0; padding: 7px 10px; color: var(--ir-accent); }
 .ir-root .ir-sel-pop button + button { border-left: 1px solid var(--ir-line); }
 .ir-root .ir-sel-pop button:hover { background: var(--ir-bg-2); }
+.ir-ctx { position: absolute; z-index: 6; min-width: 150px; padding: 4px 0; font-family: var(--ir-sans); font-size: 13px; line-height: 1.4; background: var(--ir-bg); border: 1px solid var(--ir-fg-3); user-select: none; }
+.ir-ctx-head { padding: 4px 14px 6px; font-size: 12px; color: var(--ir-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.ir-root .ir-ctx button { display: block; width: 100%; text-align: left; border: none; border-radius: 0; padding: 5px 14px; background: none; color: var(--ir-fg); font: inherit; cursor: default; }
+.ir-root .ir-ctx button:hover { background: var(--ir-bg-2); }
+.ir-ctx hr { border: none; border-top: 1px solid var(--ir-line); margin: 4px 0; }
 .ir-ask { border-left-color: var(--ir-fg-2); white-space: pre-wrap; }
 .ir-ask-anchor { text-decoration: underline dotted; text-decoration-color: var(--ir-fg-3); text-decoration-thickness: 1px; text-underline-offset: 5px; cursor: pointer; }
 .ir-ask-anchor:hover, .ir-ask-anchor.ir-on { text-decoration-color: var(--ir-accent); }

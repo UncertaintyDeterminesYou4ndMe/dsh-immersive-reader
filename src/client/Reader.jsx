@@ -56,6 +56,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const tocRunning = useRef(false)
   const bookmarkRef = useRef(null) // 顶栏书签按钮：告诉它当前在哪一段，好显示实心/空心
   const [resume, setResume] = useState(null) // 打开书时的阅读位置，进度线上标「上次读到」
+  const anchorRef = useRef(null) // 顶上那段和已经滚过它的比例：目录并排时正文变窄、重新换行，靠它停在原处
   const [liveReach, setLiveReach] = useState({}) // 这次打开后各章读到的比例，盖在 book.chapters[].read 上，目录里画进度
 
   const loadBook = useCallback(async () => {
@@ -155,6 +156,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     const { current, index, nodes } = topParagraph()
     if (!current) return
     currentPara.current = current
+    { const r = nodes[index].getBoundingClientRect(); anchorRef.current = { id: current, frac: r.height ? (root.getBoundingClientRect().top + 8 - r.top) / r.height : 0 } }
     bookmarkRef.current?.(current)
     const atEnd = root.scrollTop + root.clientHeight >= root.scrollHeight - 4
     progressRef.current?.(atEnd ? nodes.length : index)
@@ -170,6 +172,16 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
       api.saveState(bookId, { chapterId: cid, paraId: current, progress }).then(r => setStatus(r.status)).catch(() => {})
     }, 1200)
   }, [bookId, chapter, topParagraph])
+
+  useLayoutEffect(() => {
+    const a = anchorRef.current
+    const root = scrollRef.current
+    if (!a || !root) return
+    const el = root.querySelector(`[data-para="${a.id}"]`)
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    root.scrollTop += r.top + a.frac * r.height - (root.getBoundingClientRect().top + 8)
+  }, [drawer])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -335,7 +347,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const chapterMinutes = chapter ? minutesOf(chapter.paragraphs) : 0
 
   return (
-    <div className="ir-root-inner" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
+    <div className={`ir-root-inner${drawer ? ' ir-has-drawer' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
       <div className="ir-bar" data-window-drag="">
         <button className="ir-plain" onClick={onBack}>‹ 书架</button>
         <div className="ir-title" title={book ? book.title : ''}>{book ? tt(book, display) : '…'}{chapter ? <small>{tt(chapter, display)}</small> : null}</div>

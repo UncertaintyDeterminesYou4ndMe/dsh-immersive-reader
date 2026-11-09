@@ -177,6 +177,11 @@ export const CSS = `
 .ir-status.ir-busy::before { content: ""; display: inline-block; width: 6px; height: 6px; background: var(--ir-accent); margin-right: 6px; vertical-align: middle; }
 
 /* 抽屉：目录 / 术语 / 设置 */
+/* 目录抽屉：宽度够就和正文并排（正文让出右边 380px），窄了才盖在正文上 */
+.ir-root-inner { container-type: inline-size; }
+@container (min-width: 960px) {
+  .ir-has-drawer > .ir-scroll, .ir-has-drawer > .ir-progress-line { margin-right: min(380px, 100%); }
+}
 .ir-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); background: var(--ir-bg); border-left: 1px solid var(--ir-line); display: flex; flex-direction: column; z-index: 5; }
 .ir-drawer .ir-bar { padding: 8px 12px; }
 .ir-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 0 24px; }

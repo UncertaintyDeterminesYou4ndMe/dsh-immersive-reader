@@ -294,6 +294,11 @@ var CSS = `
 .ir-status.ir-busy::before { content: ""; display: inline-block; width: 6px; height: 6px; background: var(--ir-accent); margin-right: 6px; vertical-align: middle; }
 
 /* 抽屉：目录 / 术语 / 设置 */
+/* 目录抽屉：宽度够就和正文并排（正文让出右边 380px），窄了才盖在正文上 */
+.ir-root-inner { container-type: inline-size; }
+@container (min-width: 960px) {
+  .ir-has-drawer > .ir-scroll, .ir-has-drawer > .ir-progress-line { margin-right: min(380px, 100%); }
+}
 .ir-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); background: var(--ir-bg); border-left: 1px solid var(--ir-line); display: flex; flex-direction: column; z-index: 5; }
 .ir-drawer .ir-bar { padding: 8px 12px; }
 .ir-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 0 24px; }
@@ -590,6 +595,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   const tocRunning = import_react2.useRef(false);
   const bookmarkRef = import_react2.useRef(null);
   const [resume, setResume] = import_react2.useState(null);
+  const anchorRef = import_react2.useRef(null);
   const [liveReach, setLiveReach] = import_react2.useState({});
   const loadBook = import_react2.useCallback(async () => {
     const info = await api.book(bookId);
@@ -696,6 +702,10 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     if (!current)
       return;
     currentPara.current = current;
+    {
+      const r = nodes[index].getBoundingClientRect();
+      anchorRef.current = { id: current, frac: r.height ? (root.getBoundingClientRect().top + 8 - r.top) / r.height : 0 };
+    }
     bookmarkRef.current?.(current);
     const atEnd = root.scrollTop + root.clientHeight >= root.scrollHeight - 4;
     progressRef.current?.(atEnd ? nodes.length : index);
@@ -712,6 +722,17 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
       api.saveState(bookId, { chapterId: cid, paraId: current, progress }).then((r) => setStatus(r.status)).catch(() => {});
     }, 1200);
   }, [bookId, chapter, topParagraph]);
+  import_react2.useLayoutEffect(() => {
+    const a = anchorRef.current;
+    const root = scrollRef.current;
+    if (!a || !root)
+      return;
+    const el = root.querySelector(`[data-para="${a.id}"]`);
+    if (!el)
+      return;
+    const r = el.getBoundingClientRect();
+    root.scrollTop += r.top + a.frac * r.height - (root.getBoundingClientRect().top + 8);
+  }, [drawer]);
   import_react2.useEffect(() => {
     const onKey = (e) => {
       const tag = (e.target?.tagName || "").toLowerCase();
@@ -953,7 +974,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   }, [chapter, marks, asksBy, resume, display]);
   const chapterMinutes = chapter ? minutesOf(chapter.paragraphs) : 0;
   return /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-root-inner",
+    className: `ir-root-inner${drawer ? " ir-has-drawer" : ""}`,
     style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0, position: "relative" }
   }, /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-bar",

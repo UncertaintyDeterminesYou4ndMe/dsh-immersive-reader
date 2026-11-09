@@ -173,6 +173,7 @@ var CSS = `
 .ir-book .ir-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ir-book .ir-book-main { flex: 1; min-width: 0; }
 .ir-book-title { font-family: var(--ir-serif); font-size: 18px; margin: 0 0 2px; }
+.ir-book-title small { display: block; font-size: 13px; color: var(--ir-fg-2); }
 .ir-book-meta { color: var(--ir-fg-2); font-size: 13px; font-family: var(--ir-mono); }
 .ir-book-actions { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .ir-progress { height: 2px; background: var(--ir-line); margin-top: 8px; }
@@ -181,6 +182,7 @@ var CSS = `
 /* 阅读 */
 .ir-page { max-width: 44rem; margin: 0 auto; padding: 28px 24px 120px; font-family: var(--ir-serif); letter-spacing: .01em; }
 .ir-chapter-title { font-weight: normal; font-size: 1.5em; line-height: 1.4; margin: 0 0 6px; }
+.ir-chapter-orig { font-size: .8em; color: var(--ir-fg-2); margin: -2px 0 8px; }
 .ir-chapter-sub { font-family: var(--ir-sans); font-size: 13px; color: var(--ir-fg-2); margin: 0 0 24px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .ir-intro { position: relative; border-top: 1px solid var(--ir-line); border-bottom: 1px solid var(--ir-line); padding: 12px 0; margin: 0 0 28px; font-family: var(--ir-sans); font-size: .9em; line-height: 1.75; color: var(--ir-fg-2); }
 .ir-intro b { font-weight: normal; color: var(--ir-fg); margin-right: 8px; }
@@ -456,8 +458,9 @@ function Shelf({ settings, onOpen, onSettings }) {
   }) : (book.title || "书").slice(0, 1)), /* @__PURE__ */ import_react.default.createElement("div", {
     className: "ir-book-main"
   }, /* @__PURE__ */ import_react.default.createElement("div", {
-    className: "ir-book-title"
-  }, book.title), /* @__PURE__ */ import_react.default.createElement("div", {
+    className: "ir-book-title",
+    title: book.title
+  }, book.titleZh || book.title, book.titleZh ? /* @__PURE__ */ import_react.default.createElement("small", null, book.title) : null), /* @__PURE__ */ import_react.default.createElement("div", {
     className: "ir-book-meta"
   }, book.author ? `${book.author} · ` : "", book.source === "web" ? "网页 · " : "", book.chapters, " 章 · ", book.paragraphs, " 段 · 已译 ", book.translated, book.currentChapter ? ` · 读到「${book.currentChapter.slice(0, 24)}」` : "", book.stats && book.stats.minutes > 0 ? ` · 读了 ${book.stats.minutes} 分钟 / ${book.stats.days} 天${book.stats.streak > 1 ? `，连续 ${book.stats.streak} 天` : ""}` : ""), /* @__PURE__ */ import_react.default.createElement("div", {
     className: "ir-book-meta"
@@ -515,6 +518,9 @@ var DISPLAY_LABEL = { zh: "译文", bilingual: "双语", original: "原文" };
 var DISPLAY_ORDER = ["zh", "bilingual", "original"];
 var ASK_LABEL = { explain: "解释", intent: "这段在说什么", custom: "追问" };
 var ZH_PER_MINUTE = 400;
+function tt(o, display) {
+  return display !== "original" && o?.titleZh || o?.title || "";
+}
 function statusText(status, unfinished) {
   if (!status)
     return "";
@@ -555,6 +561,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   const [reading, setReading] = import_react2.useState(null);
   const speech = import_react2.useRef({ token: 0 });
   const display = settings.display ?? "zh";
+  const tocRunning = import_react2.useRef(false);
   const loadBook = import_react2.useCallback(async () => {
     const info = await api.book(bookId);
     setBook(info);
@@ -631,6 +638,12 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     }, 4000);
     return () => clearInterval(timer);
   }, [bookId, chapter?.id, busy, unfinished, loadBook]);
+  const tocBusy = Boolean(status?.toc);
+  import_react2.useEffect(() => {
+    if (tocRunning.current && !tocBusy)
+      loadBook().catch(() => {});
+    tocRunning.current = tocBusy;
+  }, [tocBusy, loadBook]);
   const onScroll = import_react2.useCallback(() => {
     const root = scrollRef.current;
     if (!root || !chapter)
@@ -876,8 +889,9 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     className: "ir-plain",
     onClick: onBack
   }, "‹ 书架"), /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-title"
-  }, book ? book.title : "…", chapter ? /* @__PURE__ */ import_react2.default.createElement("small", null, chapter.title) : null), /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-title",
+    title: book ? book.title : ""
+  }, book ? tt(book, display) : "…", chapter ? /* @__PURE__ */ import_react2.default.createElement("small", null, tt(chapter, display)) : null), /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-right"
   }, session ? /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-status",
@@ -919,7 +933,9 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     style: { fontSize: `${settings.fontSize || 18}px`, lineHeight: settings.lineHeight || 1.9 }
   }, /* @__PURE__ */ import_react2.default.createElement("h1", {
     className: "ir-chapter-title"
-  }, chapter.title), /* @__PURE__ */ import_react2.default.createElement("div", {
+  }, tt(chapter, display)), tt(chapter, display) !== chapter.title ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-chapter-orig"
+  }, chapter.title) : null, /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-chapter-sub"
   }, /* @__PURE__ */ import_react2.default.createElement("span", null, chapter.index + 1, " / ", book?.chapters.length ?? "?"), /* @__PURE__ */ import_react2.default.createElement("span", null, "约 ", chapterMinutes, " 分钟"), /* @__PURE__ */ import_react2.default.createElement("span", null, chapterMeta ? `${chapterMeta.translated}/${chapterMeta.translatable ?? chapterMeta.paragraphs} 段已译` : ""), unfinished && !busy ? /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-link",
@@ -974,15 +990,16 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   }, /* @__PURE__ */ import_react2.default.createElement("button", {
     disabled: !chapter.prev,
     onClick: () => goChapter(chapter.prev)
-  }, "‹ ", book?.chapters.find((c) => c.id === chapter.prev)?.title ?? "上一章"), /* @__PURE__ */ import_react2.default.createElement("button", {
+  }, "‹ ", tt(book?.chapters.find((c) => c.id === chapter.prev), display) || "上一章"), /* @__PURE__ */ import_react2.default.createElement("button", {
     disabled: !chapter.next,
     onClick: () => goChapter(chapter.next)
-  }, book?.chapters.find((c) => c.id === chapter.next)?.title ?? "下一章", " ›"))) : /* @__PURE__ */ import_react2.default.createElement("div", {
+  }, tt(book?.chapters.find((c) => c.id === chapter.next), display) || "下一章", " ›"))) : /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-empty"
   }, error ? "" : "打开中…")), drawer.startsWith("toc") && book ? /* @__PURE__ */ import_react2.default.createElement(TocDrawer, {
     key: drawer,
     initialTab: drawer === "toc:book" ? "book" : "toc",
     book,
+    display,
     current: chapter?.id,
     marks,
     asks,
@@ -1852,7 +1869,7 @@ function SearchTab({ book, onGo }) {
     className: "ir-hit-ch"
   }, h.chapterTitle), h.snippet))));
 }
-function MarksTab({ book, marks, onGo }) {
+function MarksTab({ book, display, marks, onGo }) {
   const entries = Object.entries(marks ?? {}).sort((a, b) => (b[1].at ?? "").localeCompare(a[1].at ?? ""));
   if (entries.length === 0)
     return /* @__PURE__ */ import_react2.default.createElement("div", {
@@ -1869,13 +1886,13 @@ function MarksTab({ book, marks, onGo }) {
       className: "ir-hit-body"
     }, /* @__PURE__ */ import_react2.default.createElement("span", {
       className: "ir-hit-ch"
-    }, ch?.title ?? pid, m.highlight ? " · 整段划线" : ""), m.ranges?.length ? m.ranges.map((r, i) => /* @__PURE__ */ import_react2.default.createElement("span", {
+    }, ch ? tt(ch, display) : pid, m.highlight ? " · 整段划线" : ""), m.ranges?.length ? m.ranges.map((r, i) => /* @__PURE__ */ import_react2.default.createElement("span", {
       key: i,
       className: "ir-hit-range"
     }, r)) : null, m.note ? m.note : !m.ranges?.length ? "（划线）" : ""));
   }));
 }
-function AsksTab({ book, asks, onGo }) {
+function AsksTab({ book, display, asks, onGo }) {
   const list = [...asks ?? []].sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
   if (list.length === 0)
     return /* @__PURE__ */ import_react2.default.createElement("div", {
@@ -1896,13 +1913,13 @@ function AsksTab({ book, asks, onGo }) {
       className: "ir-hit-body"
     }, /* @__PURE__ */ import_react2.default.createElement("span", {
       className: "ir-hit-ch"
-    }, ch?.title ?? a.paraId), /* @__PURE__ */ import_react2.default.createElement("span", {
+    }, ch ? tt(ch, display) : a.paraId), /* @__PURE__ */ import_react2.default.createElement("span", {
       className: "ir-hit-range",
       style: { textDecoration: "none" }
     }, head), String(a.answer ?? "").slice(0, 90), a.answer && a.answer.length > 90 ? "…" : ""));
   }));
 }
-function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
+function TocDrawer({ book, display, current, marks, asks, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = import_react2.useState(initialTab || "toc");
   const [term, setTerm] = import_react2.useState("");
   const [zh, setZh] = import_react2.useState("");
@@ -1935,8 +1952,9 @@ function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBo
   }, /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-bar"
   }, /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-title"
-  }, book.title), /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-title",
+    title: book.title
+  }, tt(book, display)), /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-right"
   }, /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-plain",
@@ -1972,8 +1990,9 @@ function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBo
     className: `ir-toc-item${c.id === current ? " ir-current" : ""}`,
     onClick: () => onGo(c.id)
   }, /* @__PURE__ */ import_react2.default.createElement("span", {
-    className: "ir-toc-title"
-  }, c.title), /* @__PURE__ */ import_react2.default.createElement("span", {
+    className: "ir-toc-title",
+    title: c.title
+  }, tt(c, display)), /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-toc-count"
   }, c.translated, "/", c.translatable ?? c.paragraphs))) : null, tab === "book" ? /* @__PURE__ */ import_react2.default.createElement(BookTab, {
     book,
@@ -1984,10 +2003,12 @@ function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBo
     onGo
   }) : null, tab === "marks" ? /* @__PURE__ */ import_react2.default.createElement(MarksTab, {
     book,
+    display,
     marks,
     onGo
   }) : null, tab === "asks" ? /* @__PURE__ */ import_react2.default.createElement(AsksTab, {
     book,
+    display,
     asks,
     onGo
   }) : null, tab === "intro" ? /* @__PURE__ */ import_react2.default.createElement("div", null, /* @__PURE__ */ import_react2.default.createElement("div", {

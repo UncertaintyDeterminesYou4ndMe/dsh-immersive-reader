@@ -8,6 +8,11 @@ const ASK_LABEL = { explain: '解释', intent: '这段在说什么', custom: '�
 /** 阅读时长估计：译文按 400 字/分钟；没译的段按原文字数折算（英文 → 中文约 0.3 倍） */
 const ZH_PER_MINUTE = 400
 
+/** 书名、章名按阅读模式取：原文模式看原文，其余看目录译文（还没译出时退回原文）。 */
+function tt(o, display) {
+  return (display !== 'original' && o?.titleZh) || o?.title || ''
+}
+
 function statusText(status, unfinished) {
   if (!status) return ''
   const n = (status.queued ?? 0) + (status.running ?? 0)
@@ -48,6 +53,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const [reading, setReading] = useState(null) // 正在朗读的段落 id
   const speech = useRef({ token: 0 })
   const display = settings.display ?? 'zh'
+  const tocRunning = useRef(false)
 
   const loadBook = useCallback(async () => {
     const info = await api.book(bookId)
@@ -117,6 +123,13 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     }, 4000)
     return () => clearInterval(timer)
   }, [bookId, chapter?.id, busy, unfinished, loadBook])
+
+  // 目录译完（status.toc 由真变假）就重取书，目录和标题换成中文
+  const tocBusy = Boolean(status?.toc)
+  useEffect(() => {
+    if (tocRunning.current && !tocBusy) loadBook().catch(() => {})
+    tocRunning.current = tocBusy
+  }, [tocBusy, loadBook])
 
   // 阅读位置：视口最上面的段落
   const onScroll = useCallback(() => {
@@ -283,7 +296,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     <div className="ir-root-inner" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
       <div className="ir-bar" data-window-drag="">
         <button className="ir-plain" onClick={onBack}>‹ 书架</button>
-        <div className="ir-title">{book ? book.title : '…'}{chapter ? <small>{chapter.title}</small> : null}</div>
+        <div className="ir-title" title={book ? book.title : ''}>{book ? tt(book, display) : '…'}{chapter ? <small>{tt(chapter, display)}</small> : null}</div>
         <div className="ir-right">
           {session ? <span className="ir-status" title="今日份：按设置的阅读时长切出的这一段">第 {session.day} 天 · 全书 {Math.round(100 * session.position / Math.max(1, session.total))}%</span> : null}
           <span className={`ir-status${busy ? ' ir-busy' : ''}`} title={statusText(status, unfinished)}>{statusText(status, unfinished)}</span>
@@ -298,7 +311,8 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
       <div className="ir-scroll" ref={scrollRef} onScroll={onScroll}>
         {chapter ? (
           <div className="ir-page" style={{ fontSize: `${settings.fontSize || 18}px`, lineHeight: settings.lineHeight || 1.9 }}>
-            <h1 className="ir-chapter-title">{chapter.title}</h1>
+            <h1 className="ir-chapter-title">{tt(chapter, display)}</h1>
+            {tt(chapter, display) !== chapter.title ? <div className="ir-chapter-orig">{chapter.title}</div> : null}
             <div className="ir-chapter-sub">
               <span>{chapter.index + 1} / {book?.chapters.length ?? '?'}</span>
               <span>约 {chapterMinutes} 分钟</span>
@@ -323,8 +337,8 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
             ))}
             {!chapter.next && book ? <FinishCard book={book} stats={stats} busy={recallingBook} onRecall={doRecallBook} onExport={() => setDrawer('toc:book')} /> : null}
             <div className="ir-chapter-nav">
-              <button disabled={!chapter.prev} onClick={() => goChapter(chapter.prev)}>‹ {book?.chapters.find(c => c.id === chapter.prev)?.title ?? '上一章'}</button>
-              <button disabled={!chapter.next} onClick={() => goChapter(chapter.next)}>{book?.chapters.find(c => c.id === chapter.next)?.title ?? '下一章'} ›</button>
+              <button disabled={!chapter.prev} onClick={() => goChapter(chapter.prev)}>‹ {tt(book?.chapters.find(c => c.id === chapter.prev), display) || '上一章'}</button>
+              <button disabled={!chapter.next} onClick={() => goChapter(chapter.next)}>{tt(book?.chapters.find(c => c.id === chapter.next), display) || '下一章'} ›</button>
             </div>
           </div>
         ) : <div className="ir-empty">{error ? '' : '打开中…'}</div>}
@@ -333,7 +347,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
         <TocDrawer
           key={drawer}
           initialTab={drawer === 'toc:book' ? 'book' : 'toc'}
-          book={book} current={chapter?.id} marks={marks} asks={asks}
+          book={book} display={display} current={chapter?.id} marks={marks} asks={asks}
           onClose={() => setDrawer('')} onGo={goChapter} onBookChanged={loadBook}
           onRetranslateChapter={async () => { if (!chapter) return; try { const r = await api.translate(bookId, { chapterId: chapter.id, force: true }); setStatus(r.status); setDrawer('') } catch (e) { setError(e.message) } }}
         />
@@ -836,7 +850,7 @@ function SearchTab({ book, onGo }) {
   )
 }
 
-function MarksTab({ book, marks, onGo }) {
+function MarksTab({ book, display, marks, onGo }) {
   const entries = Object.entries(marks ?? {}).sort((a, b) => (b[1].at ?? '').localeCompare(a[1].at ?? ''))
   if (entries.length === 0) return <div className="ir-block">还没有划线或笔记。选中译文里的一段文字就能划线；译文模式下点开一段，还有「划线」「笔记」。</div>
   const chapterOf = pid => book.chapters.find(c => pid.startsWith(c.id + 'p'))
@@ -846,7 +860,7 @@ function MarksTab({ book, marks, onGo }) {
         const ch = chapterOf(pid)
         return (
           <button key={pid} className="ir-toc-item ir-hit" onClick={() => onGo(ch?.id, pid)}>
-            <span className="ir-hit-body"><span className="ir-hit-ch">{ch?.title ?? pid}{m.highlight ? ' · 整段划线' : ''}</span>{m.ranges?.length ? m.ranges.map((r, i) => <span key={i} className="ir-hit-range">{r}</span>) : null}{m.note ? m.note : (!m.ranges?.length ? '（划线）' : '')}</span>
+            <span className="ir-hit-body"><span className="ir-hit-ch">{ch ? tt(ch, display) : pid}{m.highlight ? ' · 整段划线' : ''}</span>{m.ranges?.length ? m.ranges.map((r, i) => <span key={i} className="ir-hit-range">{r}</span>) : null}{m.note ? m.note : (!m.ranges?.length ? '（划线）' : '')}</span>
           </button>
         )
       })}
@@ -854,7 +868,7 @@ function MarksTab({ book, marks, onGo }) {
   )
 }
 
-function AsksTab({ book, asks, onGo }) {
+function AsksTab({ book, display, asks, onGo }) {
   const list = [...(asks ?? [])].sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
   if (list.length === 0) return <div className="ir-block">还没有追问。选中一个词或一句话点「解释」，或点开一段用「这段在说什么」「追问」，答案都会记在这里。</div>
   const chapterOf = a => book.chapters.find(c => c.id === a.chapterId || a.paraId.startsWith(c.id + 'p'))
@@ -865,7 +879,7 @@ function AsksTab({ book, asks, onGo }) {
         const head = a.selection ? `「${a.selection}」` : a.kind === 'custom' ? a.question : ASK_LABEL[a.kind]
         return (
           <button key={a.id} className="ir-toc-item ir-hit" onClick={() => { onGo(ch?.id, a.paraId); setTimeout(() => window.dispatchEvent(new CustomEvent('ir-open-ask', { detail: a.id })), 500) }}>
-            <span className="ir-hit-body"><span className="ir-hit-ch">{ch?.title ?? a.paraId}</span><span className="ir-hit-range" style={{ textDecoration: 'none' }}>{head}</span>{String(a.answer ?? '').slice(0, 90)}{a.answer && a.answer.length > 90 ? '…' : ''}</span>
+            <span className="ir-hit-body"><span className="ir-hit-ch">{ch ? tt(ch, display) : a.paraId}</span><span className="ir-hit-range" style={{ textDecoration: 'none' }}>{head}</span>{String(a.answer ?? '').slice(0, 90)}{a.answer && a.answer.length > 90 ? '…' : ''}</span>
           </button>
         )
       })}
@@ -873,7 +887,7 @@ function AsksTab({ book, asks, onGo }) {
   )
 }
 
-function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
+function TocDrawer({ book, display, current, marks, asks, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = useState(initialTab || 'toc')
   const [term, setTerm] = useState('')
   const [zh, setZh] = useState('')
@@ -893,7 +907,7 @@ function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBo
   return (
     <div className="ir-drawer" data-window-drag-recall="">
       <div className="ir-bar">
-        <div className="ir-title">{book.title}</div>
+        <div className="ir-title" title={book.title}>{tt(book, display)}</div>
         <div className="ir-right"><button className="ir-plain" onClick={onClose}>关闭</button></div>
       </div>
       <div className="ir-tabs">
@@ -908,14 +922,14 @@ function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBo
       <div className="ir-drawer-body" ref={listRef}>
         {tab === 'toc' ? book.chapters.map(c => (
           <button key={c.id} className={`ir-toc-item${c.id === current ? ' ir-current' : ''}`} onClick={() => onGo(c.id)}>
-            <span className="ir-toc-title">{c.title}</span>
+            <span className="ir-toc-title" title={c.title}>{tt(c, display)}</span>
             <span className="ir-toc-count">{c.translated}/{c.translatable ?? c.paragraphs}</span>
           </button>
         )) : null}
         {tab === 'book' ? <BookTab book={book} chapterId={current} onRetranslateChapter={onRetranslateChapter} /> : null}
         {tab === 'search' ? <SearchTab book={book} onGo={onGo} /> : null}
-        {tab === 'marks' ? <MarksTab book={book} marks={marks} onGo={onGo} /> : null}
-        {tab === 'asks' ? <AsksTab book={book} asks={asks} onGo={onGo} /> : null}
+        {tab === 'marks' ? <MarksTab book={book} display={display} marks={marks} onGo={onGo} /> : null}
+        {tab === 'asks' ? <AsksTab book={book} display={display} asks={asks} onGo={onGo} /> : null}
         {tab === 'intro' ? (
           <div>
             <div className="ir-block">{book.intro || '导读还没生成。打开任一章节时会自动生成（需要在设置里开着「导读」）。'}</div>

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LibraryStore } from '../lib/store.js'
-import { Translator, buildBatches, lookaheadTargets, parseBatchReply, extractJson, introTarget } from '../lib/translate.js'
+import { Translator, buildBatches, lookaheadTargets, parseBatchReply, extractJson, introTarget, tocPending, parseTocReply, batchPrompt } from '../lib/translate.js'
 
 const para = (id, text, kind = 'p') => ({ id, kind, text })
 const BOOK = {
@@ -33,7 +33,10 @@ function fakeCtx(calls, { failFirst = 0 } = {}) {
           return
         }
         const user = options.messages[0].content[0].text
-        if (user.includes('导读')) {
+        if (user.includes('目录标题')) {
+          const input = JSON.parse(user.slice(user.lastIndexOf('\n') + 1))
+          yield { type: 'text-delta', index: 0, text: JSON.stringify({ title: '《测试之书》', items: input.map(i => ({ id: i.id, zh: `章:${i.text}` })) }) }
+        } else if (user.includes('导读')) {
           yield { type: 'text-delta', index: 0, text: '这是导读。' }
         } else {
           const input = JSON.parse(user.slice(user.lastIndexOf('\n') + 1))
@@ -267,4 +270,38 @@ test('导读也能追问：intro:book / intro:<章> 走导读文本，提示里�
     assert.equal(introTarget(await store.book(id), await store.translations(id), 'c1p1'), null)
     assert.equal(introTarget(await store.book(id), await store.translations(id), 'intro:book').chapter.id, 'c1')
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('目录：已是中文的标题不译，回复缺漏要报出来', () => {
+  const book = { title: 'Skin in the Game', chapters: [{ id: 'a', title: '第 1 节' }, { id: 'b', title: 'Prologue' }, { id: 'c', title: 'Book 1' }] }
+  assert.deepEqual(tocPending(book, { chapters: {} }), { items: [{ id: 'b', text: 'Prologue' }, { id: 'c', text: 'Book 1' }], title: true })
+  assert.deepEqual(tocPending(book, { title: '利益攸关', chapters: { b: { title: '序幕' }, c: { title: '第一卷' } } }), { items: [], title: false })
+  const reply = parseTocReply('```json\n{"title":"《利益攸关》","items":[{"id":"b","zh":"序幕"},{"id":"x","zh":"多余"}]}\n```', ['b', 'c'])
+  assert.equal(reply.title, '利益攸关')
+  assert.deepEqual([...reply.items], [['b', '序幕']])
+  assert.deepEqual(reply.missing, ['c'])
+})
+
+test('目录排在队首先译，正文翻译沿用目录里的章名', async () => {
+  const { store, dir } = await tempStore()
+  try {
+    const book = await store.addBook(new Uint8Array([4, 5, 6]), { filename: 'b.txt', doc: BOOK })
+    const calls = []
+    const translator = new Translator({ ctx: fakeCtx(calls), store, logger: { info() {}, warn() {} } })
+    const settings = { ...(await store.settings()), concurrency: 1, intros: false }
+    await translator.ensureLookahead(book.id, { chapterId: 'c1', paraId: 'c1p1' }, { ...settings, lookahead: { unit: 'chapters', count: 0 } })
+    await waitIdle(translator, book.id)
+    assert.ok(calls[0].messages[0].content[0].text.includes('目录标题'), '第一个请求是目录')
+    const trans = await store.translations(book.id)
+    assert.equal(trans.title, '测试之书')
+    assert.equal(trans.chapters.c2.title, '章:Two')
+    assert.ok(calls[1].messages[0].content[0].text.includes('目录里译作「章:One」'))
+    // 译完不再排目录
+    assert.equal(translator.status(book.id).toc, false)
+    await translator.ensureLookahead(book.id, { chapterId: 'c1', paraId: 'c1p1' }, { ...settings, lookahead: { unit: 'chapters', count: 0 } })
+    assert.equal(translator.status(book.id).toc, false)
+    assert.ok(!batchPrompt({ book: BOOK, chapter: BOOK.chapters[0], batch: [], glossary: [], previous: [] }).includes('目录里译作'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

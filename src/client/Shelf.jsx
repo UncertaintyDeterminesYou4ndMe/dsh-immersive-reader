@@ -77,7 +77,7 @@ export function Shelf({ settings, onOpen, onSettings }) {
           <div className="ir-book" key={book.id} onClick={() => onOpen(book.id)}>
             <div className="ir-cover">{book.coverFile ? <img src={`${API_BASE}/books/${book.id}/assets/${book.coverFile}`} alt="" /> : (book.title || '书').slice(0, 1)}</div>
             <div className="ir-book-main">
-              <div className="ir-book-title">{book.title}</div>
+              <div className="ir-book-title" title={book.title}>{book.titleZh || book.title}{book.titleZh ? <small>{book.title}</small> : null}</div>
               <div className="ir-book-meta">
                 {book.author ? `${book.author} · ` : ''}{book.source === 'web' ? '网页 · ' : ''}{book.chapters} 章 · {book.paragraphs} 段 · 已译 {book.translated}
                 {book.currentChapter ? ` · 读到「${book.currentChapter.slice(0, 24)}」` : ''}

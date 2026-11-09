@@ -1,5 +1,5 @@
 /** 浏览器半访问宿主的唯一出口。所有失败都抛 Error，message 已是给人看的中文。 */
-export const API_BASE = '/api/immersive-reader'
+export const API_BASE = '/api/reading-room'
 
 async function call(method, path, { json, body, headers } = {}) {
   let res

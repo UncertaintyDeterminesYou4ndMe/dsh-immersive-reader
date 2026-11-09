@@ -1,4 +1,4 @@
-# dsh-immersive-reader · 阅读室
+# dsh-reading-room · 阅读室
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）里用母语读原版书。
 
@@ -28,8 +28,8 @@ EPUB 里的插图、图表按原位显示；表格按表格还原；脚注引用
 需要 dsh ≥ 0.2.0（Node ≥ 24.9）。
 
 ```sh
-dsh plugin --profile web add github:UncertaintyDeterminesYou4ndMe/dsh-immersive-reader   # 从 GitHub
-dsh plugin --profile web add /path/to/dsh-immersive-reader                              # 或本地目录
+dsh plugin --profile web add github:UncertaintyDeterminesYou4ndMe/dsh-reading-room   # 从 GitHub
+dsh plugin --profile web add /path/to/dsh-reading-room                              # 或本地目录
 ```
 
 `client.js` 是已打好的浏览器产物，直接从 Git 源安装即可，不需要 bun。
@@ -39,7 +39,7 @@ dsh plugin --profile web add /path/to/dsh-immersive-reader                      
 官方桌面版（deepseek.com/harness/ 下载）独占自己的 profile：先打开过一次桌面版并完全退出，再用它自带的命令安装，或在应用内「插件」页添加：
 
 ```sh
-"/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" plugin --profile desktop add github:UncertaintyDeterminesYou4ndMe/dsh-immersive-reader
+"/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" plugin --profile desktop add github:UncertaintyDeterminesYou4ndMe/dsh-reading-room
 ```
 
 模型：默认跟随 dsh 当前默认模型（设置页可单独选），不需要也不读取任何 API key。
@@ -56,7 +56,7 @@ dsh plugin --profile web add /path/to/dsh-immersive-reader                      
 
 ## 数据
 
-全部落在 `$DSH_HOME/immersive-reader/`（默认 `~/.dsh/immersive-reader/`）：
+全部落在 `$DSH_HOME/reading-room/`（默认 `~/.dsh/reading-room/`）：
 
 ```
 settings.json
@@ -74,8 +74,8 @@ books/<id>/source.epub  原始文件
 可在 profile 的 `cordis.patch.yml` 里按 id 覆盖书库目录：
 
 ```yaml
-- id: immersive-reader
-  name: 'dsh-immersive-reader'
+- id: reading-room
+  name: 'dsh-reading-room'
   config:
     libraryDir: /absolute/path
 ```
@@ -104,7 +104,7 @@ lib/epub.js           EPUB → BookDoc（fflate 解包，自写 XML/HTML tokeniz
 lib/html-text.js      XHTML → 文本块
 lib/text.js           TXT / Markdown → BookDoc（识别「第 N 章」「Chapter N」等）
 lib/translate.js      提示词、分批、解析、预译队列（ctx.llm.stream）
-lib/routes.js         /api/immersive-reader/**
+lib/routes.js         /api/reading-room/**
 lib/tools.js          agent 工具
 src/client/           浏览器半（React，挂在 dsh 的 main + sidebar.panellist 两个 slot）
 ```

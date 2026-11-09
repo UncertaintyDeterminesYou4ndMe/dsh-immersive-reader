@@ -2,7 +2,7 @@
  * 样式：参照「汉译世界学术名著」那类纸书的版式——正文宋体、1px 细线分隔、单一强调色、无阴影无圆角。
  * 颜色尽量接 dsh 的主题 token（--dsw-alias-*），token 缺失时退到纸墨默认值，所以在深浅两套主题下都能读。
  */
-const STYLE_ID = 'dsh-immersive-reader-style'
+const STYLE_ID = 'dsh-reading-room-style'
 
 export const CSS = `
 .ir-root {
@@ -213,7 +213,7 @@ export const CSS = `
 }
 `
 
-const PLUGIN_ID = 'dsh-immersive-reader'
+const PLUGIN_ID = 'dsh-reading-room'
 
 export function ensureStyle(doc) {
   if (!doc || !doc.head) return

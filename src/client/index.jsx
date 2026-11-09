@@ -12,11 +12,11 @@ import { Reader } from './Reader.jsx'
 import { Settings } from './Settings.jsx'
 import { setAskAgent, resolveAskAgent } from './host.js'
 
-const PANEL_ID = 'immersive-reader'
-const LAST_KEY = 'dsh-immersive-reader:last'
+const PANEL_ID = 'reading-room'
+const LAST_KEY = 'dsh-reading-room:last'
 
 function readLast() {
-  try { return JSON.parse(window.localStorage.getItem(LAST_KEY) || 'null') } catch { return null }
+  try { return JSON.parse(window.localStorage.getItem(LAST_KEY) || window.localStorage.getItem('dsh-immersive-reader:last') || 'null') } catch { return null }
 }
 function writeLast(value) {
   try { window.localStorage.setItem(LAST_KEY, JSON.stringify(value)) } catch { /* 隐私模式 */ }
@@ -79,10 +79,10 @@ export function PanelIcon(props) {
 export const inject = ['slots']
 
 export function apply(ctx) {
-  try { if (typeof document !== 'undefined') ensureStyle(document) } catch (error) { console.warn('[immersive-reader] 样式注入失败', error) }
+  try { if (typeof document !== 'undefined') ensureStyle(document) } catch (error) { console.warn('[reading-room] 样式注入失败', error) }
   const slots = ctx && ctx.slots
   if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function') {
-    console.warn('[immersive-reader] 宿主没有 slots 服务，不提供界面')
+    console.warn('[reading-room] 宿主没有 slots 服务，不提供界面')
     return
   }
   try { setAskAgent(resolveAskAgent(ctx)) } catch { /* 没有 uiWorkspace 就降级为复制到剪贴板 */ }
@@ -91,5 +91,5 @@ export function apply(ctx) {
     disposers.push(slots.inject('main', () => slots.register({ name: 'main', key: PANEL_ID }, PanelPage)))
     disposers.push(slots.inject('sidebar.panellist', () => slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 60, label: () => '阅读室' }, PanelIcon)))
     return () => { for (const d of disposers.splice(0)) { try { d() } catch { /* 忽略 */ } } }
-  }, 'immersive-reader: 面板入口')
+  }, 'reading-room: 面板入口')
 }

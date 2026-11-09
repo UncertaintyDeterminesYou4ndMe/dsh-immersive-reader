@@ -1,9 +1,9 @@
-# dsh-immersive-reader 的 profile 补丁：`dsh plugin --profile web add <本目录>` 后自动插入。
+# dsh-reading-room 的 profile 补丁：`dsh plugin --profile web add <本目录>` 后自动插入。
 # 可配置项都有默认值；要改就在 profile 的 cordis.patch.yml 里按 id 覆盖：
-#   - id: immersive-reader
-#     name: 'dsh-immersive-reader'
+#   - id: reading-room
+#     name: 'dsh-reading-room'
 #     config:
-#       libraryDir: /absolute/path   # 书库目录，默认 $DSH_HOME/immersive-reader
+#       libraryDir: /absolute/path   # 书库目录，默认 $DSH_HOME/reading-room
 - insert:
-    - id: immersive-reader
-      name: 'dsh-immersive-reader'
+    - id: reading-room
+      name: 'dsh-reading-room'

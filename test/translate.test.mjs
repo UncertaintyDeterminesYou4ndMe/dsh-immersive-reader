@@ -33,13 +33,15 @@ function fakeCtx(calls, { failFirst = 0 } = {}) {
           return
         }
         const user = options.messages[0].content[0].text
-        if (user.includes('目录标题')) {
-          const input = JSON.parse(user.slice(user.lastIndexOf('\n') + 1))
+        // 目录和正文批次的提示最后一行是 JSON 数组；导读没有。不能靠「导读」二字分辨：
+        // 全书导读先出来时，正文批次的提示里也会带上它
+        let input = null
+        try { input = JSON.parse(user.slice(user.lastIndexOf('\n') + 1)) } catch { /* 导读 */ }
+        if (Array.isArray(input) && user.includes('目录标题')) {
           yield { type: 'text-delta', index: 0, text: JSON.stringify({ title: '《测试之书》', items: input.map(i => ({ id: i.id, zh: `章:${i.text}` })) }) }
-        } else if (user.includes('导读')) {
+        } else if (!Array.isArray(input)) {
           yield { type: 'text-delta', index: 0, text: '这是导读。' }
         } else {
-          const input = JSON.parse(user.slice(user.lastIndexOf('\n') + 1))
           const items = input.map(p => ({ id: p.id, zh: `译:${p.text}`, ...(p.id === 'c1p2' ? { note: '注释' } : {}) }))
           yield { type: 'text-delta', index: 0, text: '```json\n' + JSON.stringify({ items, glossary: [{ term: 'Alpha', zh: '阿尔法' }] }) + '\n```' }
         }

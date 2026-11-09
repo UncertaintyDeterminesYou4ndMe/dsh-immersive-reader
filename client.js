@@ -1,9 +1,9 @@
 /**
- * dsh-immersive-reader · 浏览器半 —— 构建产物，不要手改（node build.mjs 从 src/client/ 生成）。
+ * dsh-reading-room · 浏览器半 —— 构建产物，不要手改（node build.mjs 从 src/client/ 生成）。
  * 只 require 宿主给的 react；界面全部是 slot 里的 React 组件。
  */
 window.__ModuleLoader__.load({
-  id: "dsh-immersive-reader",
+  id: "dsh-reading-room",
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -60,7 +60,7 @@ module.exports = __toCommonJS(exports_client);
 var import_react4 = __toESM(require("react"));
 
 // src/client/api.js
-var API_BASE = "/api/immersive-reader";
+var API_BASE = "/api/reading-room";
 async function call(method, path, { json, body, headers } = {}) {
   let res;
   try {
@@ -120,7 +120,7 @@ var api = {
 };
 
 // src/client/style.js
-var STYLE_ID = "dsh-immersive-reader-style";
+var STYLE_ID = "dsh-reading-room-style";
 var CSS = `
 .ir-root {
   --ir-bg: var(--dsw-alias-bg-base, #faf9f6);
@@ -329,7 +329,7 @@ var CSS = `
   .ir-field .ir-field-help { grid-column: 1; }
 }
 `;
-var PLUGIN_ID = "dsh-immersive-reader";
+var PLUGIN_ID = "dsh-reading-room";
 function ensureStyle(doc) {
   if (!doc || !doc.head)
     return;
@@ -514,7 +514,7 @@ function askAgent(prompt) {
   try {
     return askAgentImpl(prompt) !== false;
   } catch (error) {
-    console.warn("[immersive-reader] 交给 agent 失败", error);
+    console.warn("[reading-room] 交给 agent 失败", error);
     return false;
   }
 }
@@ -2555,11 +2555,11 @@ function Settings({ settings, onChange, onBack }) {
 }
 
 // src/client/index.jsx
-var PANEL_ID = "immersive-reader";
-var LAST_KEY = "dsh-immersive-reader:last";
+var PANEL_ID = "reading-room";
+var LAST_KEY = "dsh-reading-room:last";
 function readLast() {
   try {
-    return JSON.parse(window.localStorage.getItem(LAST_KEY) || "null");
+    return JSON.parse(window.localStorage.getItem(LAST_KEY) || window.localStorage.getItem("dsh-immersive-reader:last") || "null");
   } catch {
     return null;
   }
@@ -2679,11 +2679,11 @@ function apply(ctx) {
     if (typeof document !== "undefined")
       ensureStyle(document);
   } catch (error) {
-    console.warn("[immersive-reader] 样式注入失败", error);
+    console.warn("[reading-room] 样式注入失败", error);
   }
   const slots = ctx && ctx.slots;
   if (!slots || typeof slots.inject !== "function" || typeof slots.register !== "function") {
-    console.warn("[immersive-reader] 宿主没有 slots 服务，不提供界面");
+    console.warn("[reading-room] 宿主没有 slots 服务，不提供界面");
     return;
   }
   try {
@@ -2700,7 +2700,7 @@ function apply(ctx) {
         } catch {}
       }
     };
-  }, "immersive-reader: 面板入口");
+  }, "reading-room: 面板入口");
 }
 
     return module.exports

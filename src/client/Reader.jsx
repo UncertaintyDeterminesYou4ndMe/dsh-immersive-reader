@@ -54,6 +54,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const speech = useRef({ token: 0 })
   const display = settings.display ?? 'zh'
   const tocRunning = useRef(false)
+  const [resume, setResume] = useState(null) // 打开书时的阅读位置，进度线上标「上次读到」
 
   const loadBook = useCallback(async () => {
     const info = await api.book(bookId)
@@ -83,6 +84,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
           ? info.state.chapterId
           : (info.startChapterId ?? info.chapters[0]?.id)
         if (!cid) { setError('这本书没有可读的章节'); return }
+        if (info.state?.chapterId && info.state.paraId) setResume({ chapterId: info.state.chapterId, paraId: info.state.paraId })
         await loadChapter(cid, info.state?.chapterId === cid ? info.state.paraId ?? null : null)
         api.saveState(bookId, { chapterId: cid, paraId: info.state?.paraId }).then(r => setStatus(r.status)).catch(() => {})
         api.session(bookId).then(setSession).catch(() => {})
@@ -162,6 +164,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
       if (tag === 'input' || tag === 'textarea' || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'ArrowRight' && chapter?.next) goChapter(chapter.next)
       else if (e.key === 'ArrowLeft' && chapter?.prev) goChapter(chapter.prev)
+      else if (e.key === 'b') toggleBookmark()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -237,6 +240,12 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const setMark = async (paraId, patch) => {
     try { setMarks(await api.setMark(bookId, paraId, patch)) } catch (e) { setError(e.message) }
   }
+  // 书签：加在视口最上面那段；再按一次取消
+  const toggleBookmark = () => {
+    if (!chapter) return
+    const pid = chapter.paragraphs.some(p => p.id === currentPara.current) ? currentPara.current : chapter.paragraphs[0]?.id
+    if (pid) setMark(pid, { bookmark: !marks[pid]?.bookmark })
+  }
   const asksBy = useMemo(() => {
     const m = {}
     for (const a of asks) { (m[a.paraId] ??= []).push(a) }
@@ -290,6 +299,24 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   }
 
   const chapterMeta = book && chapter ? book.chapters.find(c => c.id === chapter.id) : null
+  // 进度线上的标记：一段一个，合并这段上的书签、划线、笔记、追问和上次读到
+  const markers = useMemo(() => {
+    if (!chapter) return []
+    const out = []
+    chapter.paragraphs.forEach((p, index) => {
+      const m = marks[p.id]
+      const kinds = []
+      if (m?.bookmark) kinds.push('书签')
+      if (resume?.chapterId === chapter.id && resume.paraId === p.id) kinds.push('上次读到')
+      if (m?.highlight || m?.ranges?.length) kinds.push('划线')
+      if (m?.note) kinds.push('笔记')
+      if (asksBy[p.id]?.length) kinds.push('追问')
+      if (!kinds.length) return
+      const text = m?.ranges?.[0] ?? m?.note ?? asksBy[p.id]?.[0]?.selection ?? (display === 'original' ? p.text : p.zh || p.text) ?? ''
+      out.push({ paraId: p.id, index, kinds, text: text.length > 60 ? text.slice(0, 60) + '…' : text })
+    })
+    return out
+  }, [chapter, marks, asksBy, resume, display])
   const chapterMinutes = chapter ? minutesOf(chapter.paragraphs) : 0
 
   return (
@@ -302,11 +329,12 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
           <span className={`ir-status${busy ? ' ir-busy' : ''}`} title={statusText(status, unfinished)}>{statusText(status, unfinished)}</span>
           {canSpeak ? <button className={`ir-plain${reading ? ' ir-reading-on' : ''}`} onClick={() => reading ? stopReading() : startReading()} title={reading ? '停止朗读' : '从当前位置朗读译文（原文模式读原文）'}>{reading ? '停止' : '朗读'}</button> : null}
           <button className="ir-plain" onClick={cycleDisplay} title="切换显示：译文 / 双语 / 原文">{DISPLAY_LABEL[display]}</button>
+          <button className="ir-plain" onClick={toggleBookmark} title="在当前位置加书签，再按一次取消（快捷键 B）">书签</button>
           <button className="ir-plain" onClick={() => setDrawer(drawer === 'toc' ? '' : 'toc')}>目录</button>
           <button className="ir-plain" onClick={onSettings}>设置</button>
         </div>
       </div>
-      {chapter ? <ProgressLine key={chapter.id} total={chapter.paragraphs.length} register={fn => { progressRef.current = fn }} /> : null}
+      {chapter ? <ProgressLine key={chapter.id} total={chapter.paragraphs.length} markers={markers} onJump={pid => goChapter(chapter.id, pid)} register={fn => { progressRef.current = fn }} /> : null}
       {error ? <div className="ir-error">{error} <button className="ir-link" onClick={() => setError('')}>关闭</button></div> : null}
       <div className="ir-scroll" ref={scrollRef} onScroll={onScroll}>
         {chapter ? (
@@ -357,11 +385,25 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
 }
 
 /** 顶栏下的 2px 进度线：本章读到哪了。靠 register 回调从滚动事件直接更新，不让整章重渲染。 */
-function ProgressLine({ total, register }) {
+function ProgressLine({ total, register, markers = [], onJump }) {
   const [index, setIndex] = useState(0)
   useEffect(() => { register(setIndex); return () => register(null) }, [register])
   const pct = total > 0 ? Math.min(100, Math.round(100 * index / total)) : 0
-  return <div className="ir-progress-line" title={`本章 ${pct}%`}><i style={{ width: `${pct}%` }} /></div>
+  return (
+    <div className="ir-progress-line">
+      <i style={{ width: `${pct}%` }} title={`本章 ${pct}%`} />
+      {markers.map(mk => {
+        const at = total > 0 ? (100 * mk.index) / total : 0
+        const kind = mk.kinds.includes('书签') ? 'bookmark' : mk.kinds.includes('上次读到') ? 'resume' : 'note'
+        const side = at < 20 ? 'ir-tip-l' : at > 80 ? 'ir-tip-r' : ''
+        return (
+          <button key={mk.paraId} className={`ir-mk ir-mk-${kind}`} style={{ left: `${at}%` }} onClick={() => onJump?.(mk.paraId)} aria-label={mk.kinds.join('、')}>
+            <span className={`ir-mk-tip ${side}`}><b>{mk.kinds.join(' · ')}</b>{mk.text}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 /** 最后一章末尾：读完全书之后做什么 */
@@ -684,7 +726,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
   const [retrans, setRetrans] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
-  const kindClass = `ir-para ir-${p.kind || 'p'}${selection ? ' ir-has-sel' : ''}${reading ? ' ir-reading' : ''}`
+  const kindClass = `ir-para ir-${p.kind || 'p'}${selection ? ' ir-has-sel' : ''}${reading ? ' ir-reading' : ''}${mark?.bookmark ? ' ir-bookmarked' : ''}`
   const isHeading = p.kind === 'h1' || p.kind === 'h2' || p.kind === 'h3'
   const isTable = p.kind === 'table'
 
@@ -701,7 +743,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
   if (p.kind === 'img') {
     if (!p.file) return null
     return (
-      <figure className="ir-figure" data-para={p.id}>
+      <figure className={`ir-figure${mark?.bookmark ? ' ir-bookmarked' : ''}`} data-para={p.id}>
         <img src={`${API_BASE}/books/${bookId}/assets/${p.file}`} alt={p.text || ''} loading="lazy" />
         {p.text && !/^(image|img|figure|picture|photo|\d+)$/i.test(p.text.trim()) && !/\.(png|jpe?g|gif|webp|svg)$/i.test(p.text.trim()) ? <figcaption>{p.text}</figcaption> : null}
       </figure>
@@ -852,7 +894,7 @@ function SearchTab({ book, onGo }) {
 
 function MarksTab({ book, display, marks, onGo }) {
   const entries = Object.entries(marks ?? {}).sort((a, b) => (b[1].at ?? '').localeCompare(a[1].at ?? ''))
-  if (entries.length === 0) return <div className="ir-block">还没有划线或笔记。选中译文里的一段文字就能划线；译文模式下点开一段，还有「划线」「笔记」。</div>
+  if (entries.length === 0) return <div className="ir-block">还没有划线、笔记或书签。选中译文里的一段文字就能划线；译文模式下点开一段，还有「划线」「笔记」。</div>
   const chapterOf = pid => book.chapters.find(c => pid.startsWith(c.id + 'p'))
   return (
     <div>
@@ -860,7 +902,7 @@ function MarksTab({ book, display, marks, onGo }) {
         const ch = chapterOf(pid)
         return (
           <button key={pid} className="ir-toc-item ir-hit" onClick={() => onGo(ch?.id, pid)}>
-            <span className="ir-hit-body"><span className="ir-hit-ch">{ch ? tt(ch, display) : pid}{m.highlight ? ' · 整段划线' : ''}</span>{m.ranges?.length ? m.ranges.map((r, i) => <span key={i} className="ir-hit-range">{r}</span>) : null}{m.note ? m.note : (!m.ranges?.length ? '（划线）' : '')}</span>
+            <span className="ir-hit-body"><span className="ir-hit-ch">{ch ? tt(ch, display) : pid}{m.bookmark ? ' · 书签' : ''}{m.highlight ? ' · 整段划线' : ''}</span>{m.ranges?.length ? m.ranges.map((r, i) => <span key={i} className="ir-hit-range">{r}</span>) : null}{m.note ? m.note : (!m.ranges?.length && (m.highlight || !m.bookmark) ? '（划线）' : '')}</span>
           </button>
         )
       })}

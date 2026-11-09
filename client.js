@@ -245,8 +245,23 @@ var CSS = `
 .ir-root .ir-ask .ir-ask-del:hover { color: var(--ir-accent); }
 .ir-para.ir-reading { border-left: 2px solid var(--ir-accent); margin-left: -14px; padding-left: 12px; }
 .ir-root button.ir-plain.ir-reading-on { color: var(--ir-accent); }
-.ir-progress-line { height: 2px; background: var(--ir-line); flex: none; }
+.ir-progress-line { position: relative; z-index: 3; height: 2px; background: var(--ir-line); flex: none; }
 .ir-progress-line i { display: block; height: 100%; width: 0; background: var(--ir-accent); }
+/* 进度线上的标记：按钮是 10px 宽的热区，看得见的只有一道细刻度 */
+.ir-root .ir-mk { position: absolute; top: -4px; width: 10px; height: 14px; margin-left: -5px; padding: 0; border: none; border-radius: 0; background: none; cursor: pointer; }
+.ir-mk::after { content: ""; position: absolute; left: 4px; top: 4px; width: 2px; height: 6px; background: var(--ir-fg-3); }
+/* 书签做成带缺口的小书签条，和「上次读到」的细竖线分得开（有的主题强调色就是墨色） */
+.ir-mk-bookmark::after { left: 2px; top: 2px; width: 6px; height: 10px; background: var(--ir-accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
+.ir-mk-resume::after { height: 10px; background: var(--ir-fg); }
+.ir-mk:hover::after { background: var(--ir-accent); }
+.ir-mk-tip { display: none; position: absolute; top: 16px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 320px; padding: 6px 10px; background: var(--ir-bg); border: 1px solid var(--ir-fg-3); font-family: var(--ir-sans); font-size: 12px; line-height: 1.6; color: var(--ir-fg); text-align: left; white-space: normal; pointer-events: none; }
+.ir-mk-tip.ir-tip-l { left: 0; transform: none; }
+.ir-mk-tip.ir-tip-r { left: auto; right: 0; transform: none; }
+.ir-mk-tip b { display: block; font-weight: normal; color: var(--ir-fg-2); }
+.ir-mk:hover .ir-mk-tip, .ir-mk:focus-visible .ir-mk-tip { display: block; }
+/* 加了书签的段落：左边一道细竖线 */
+.ir-bookmarked { position: relative; }
+.ir-bookmarked::after { content: ""; position: absolute; left: -14px; top: .4em; width: 2px; height: 1.1em; background: var(--ir-accent); }
 .ir-root[data-font="sans"] .ir-page { font-family: var(--ir-sans); letter-spacing: 0; }
 .ir-root[data-font="sans"] .ir-src { font-family: var(--ir-sans); }
 .ir-booktab code { font-family: var(--ir-mono); font-size: .9em; word-break: break-all; }
@@ -562,6 +577,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   const speech = import_react2.useRef({ token: 0 });
   const display = settings.display ?? "zh";
   const tocRunning = import_react2.useRef(false);
+  const [resume, setResume] = import_react2.useState(null);
   const loadBook = import_react2.useCallback(async () => {
     const info = await api.book(bookId);
     setBook(info);
@@ -591,6 +607,8 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
           setError("这本书没有可读的章节");
           return;
         }
+        if (info.state?.chapterId && info.state.paraId)
+          setResume({ chapterId: info.state.chapterId, paraId: info.state.paraId });
         await loadChapter(cid, info.state?.chapterId === cid ? info.state.paraId ?? null : null);
         api.saveState(bookId, { chapterId: cid, paraId: info.state?.paraId }).then((r) => setStatus(r.status)).catch(() => {});
         api.session(bookId).then(setSession).catch(() => {});
@@ -683,6 +701,8 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
         goChapter(chapter.next);
       else if (e.key === "ArrowLeft" && chapter?.prev)
         goChapter(chapter.prev);
+      else if (e.key === "b")
+        toggleBookmark();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -791,6 +811,13 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
       setError(e.message);
     }
   };
+  const toggleBookmark = () => {
+    if (!chapter)
+      return;
+    const pid = chapter.paragraphs.some((p) => p.id === currentPara.current) ? currentPara.current : chapter.paragraphs[0]?.id;
+    if (pid)
+      setMark(pid, { bookmark: !marks[pid]?.bookmark });
+  };
   const asksBy = import_react2.useMemo(() => {
     const m = {};
     for (const a of asks) {
@@ -878,6 +905,30 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     onDisplayChange(next);
   };
   const chapterMeta = book && chapter ? book.chapters.find((c) => c.id === chapter.id) : null;
+  const markers = import_react2.useMemo(() => {
+    if (!chapter)
+      return [];
+    const out = [];
+    chapter.paragraphs.forEach((p, index) => {
+      const m = marks[p.id];
+      const kinds = [];
+      if (m?.bookmark)
+        kinds.push("书签");
+      if (resume?.chapterId === chapter.id && resume.paraId === p.id)
+        kinds.push("上次读到");
+      if (m?.highlight || m?.ranges?.length)
+        kinds.push("划线");
+      if (m?.note)
+        kinds.push("笔记");
+      if (asksBy[p.id]?.length)
+        kinds.push("追问");
+      if (!kinds.length)
+        return;
+      const text = m?.ranges?.[0] ?? m?.note ?? asksBy[p.id]?.[0]?.selection ?? (display === "original" ? p.text : p.zh || p.text) ?? "";
+      out.push({ paraId: p.id, index, kinds, text: text.length > 60 ? text.slice(0, 60) + "…" : text });
+    });
+    return out;
+  }, [chapter, marks, asksBy, resume, display]);
   const chapterMinutes = chapter ? minutesOf(chapter.paragraphs) : 0;
   return /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-root-inner",
@@ -909,6 +960,10 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     title: "切换显示：译文 / 双语 / 原文"
   }, DISPLAY_LABEL[display]), /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-plain",
+    onClick: toggleBookmark,
+    title: "在当前位置加书签，再按一次取消（快捷键 B）"
+  }, "书签"), /* @__PURE__ */ import_react2.default.createElement("button", {
+    className: "ir-plain",
     onClick: () => setDrawer(drawer === "toc" ? "" : "toc")
   }, "目录"), /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-plain",
@@ -916,6 +971,8 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   }, "设置"))), chapter ? /* @__PURE__ */ import_react2.default.createElement(ProgressLine, {
     key: chapter.id,
     total: chapter.paragraphs.length,
+    markers,
+    onJump: (pid) => goChapter(chapter.id, pid),
     register: (fn) => {
       progressRef.current = fn;
     }
@@ -1019,7 +1076,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     }
   }) : null);
 }
-function ProgressLine({ total, register }) {
+function ProgressLine({ total, register, markers = [], onJump }) {
   const [index, setIndex] = import_react2.useState(0);
   import_react2.useEffect(() => {
     register(setIndex);
@@ -1027,10 +1084,23 @@ function ProgressLine({ total, register }) {
   }, [register]);
   const pct = total > 0 ? Math.min(100, Math.round(100 * index / total)) : 0;
   return /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-progress-line",
-    title: `本章 ${pct}%`
+    className: "ir-progress-line"
   }, /* @__PURE__ */ import_react2.default.createElement("i", {
-    style: { width: `${pct}%` }
+    style: { width: `${pct}%` },
+    title: `本章 ${pct}%`
+  }), markers.map((mk) => {
+    const at = total > 0 ? 100 * mk.index / total : 0;
+    const kind = mk.kinds.includes("书签") ? "bookmark" : mk.kinds.includes("上次读到") ? "resume" : "note";
+    const side = at < 20 ? "ir-tip-l" : at > 80 ? "ir-tip-r" : "";
+    return /* @__PURE__ */ import_react2.default.createElement("button", {
+      key: mk.paraId,
+      className: `ir-mk ir-mk-${kind}`,
+      style: { left: `${at}%` },
+      onClick: () => onJump?.(mk.paraId),
+      "aria-label": mk.kinds.join("、")
+    }, /* @__PURE__ */ import_react2.default.createElement("span", {
+      className: `ir-mk-tip ${side}`
+    }, /* @__PURE__ */ import_react2.default.createElement("b", null, mk.kinds.join(" · ")), mk.text));
   }));
 }
 function FinishCard({ book, stats, busy, onRecall, onExport }) {
@@ -1489,7 +1559,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
   const [retrans, setRetrans] = import_react2.useState(false);
   const [instruction, setInstruction] = import_react2.useState("");
   const [busy, setBusy] = import_react2.useState(false);
-  const kindClass = `ir-para ir-${p.kind || "p"}${selection ? " ir-has-sel" : ""}${reading ? " ir-reading" : ""}`;
+  const kindClass = `ir-para ir-${p.kind || "p"}${selection ? " ir-has-sel" : ""}${reading ? " ir-reading" : ""}${mark?.bookmark ? " ir-bookmarked" : ""}`;
   const isHeading = p.kind === "h1" || p.kind === "h2" || p.kind === "h3";
   const isTable = p.kind === "table";
   const doRetranslate = async () => {
@@ -1512,7 +1582,7 @@ function Paragraph({ p, display, bookId, book, chapter, mark, asks, reading, onR
     if (!p.file)
       return null;
     return /* @__PURE__ */ import_react2.default.createElement("figure", {
-      className: "ir-figure",
+      className: `ir-figure${mark?.bookmark ? " ir-bookmarked" : ""}`,
       "data-para": p.id
     }, /* @__PURE__ */ import_react2.default.createElement("img", {
       src: `${API_BASE}/books/${bookId}/assets/${p.file}`,
@@ -1874,7 +1944,7 @@ function MarksTab({ book, display, marks, onGo }) {
   if (entries.length === 0)
     return /* @__PURE__ */ import_react2.default.createElement("div", {
       className: "ir-block"
-    }, "还没有划线或笔记。选中译文里的一段文字就能划线；译文模式下点开一段，还有「划线」「笔记」。");
+    }, "还没有划线、笔记或书签。选中译文里的一段文字就能划线；译文模式下点开一段，还有「划线」「笔记」。");
   const chapterOf = (pid) => book.chapters.find((c) => pid.startsWith(c.id + "p"));
   return /* @__PURE__ */ import_react2.default.createElement("div", null, entries.map(([pid, m]) => {
     const ch = chapterOf(pid);
@@ -1886,10 +1956,10 @@ function MarksTab({ book, display, marks, onGo }) {
       className: "ir-hit-body"
     }, /* @__PURE__ */ import_react2.default.createElement("span", {
       className: "ir-hit-ch"
-    }, ch ? tt(ch, display) : pid, m.highlight ? " · 整段划线" : ""), m.ranges?.length ? m.ranges.map((r, i) => /* @__PURE__ */ import_react2.default.createElement("span", {
+    }, ch ? tt(ch, display) : pid, m.bookmark ? " · 书签" : "", m.highlight ? " · 整段划线" : ""), m.ranges?.length ? m.ranges.map((r, i) => /* @__PURE__ */ import_react2.default.createElement("span", {
       key: i,
       className: "ir-hit-range"
-    }, r)) : null, m.note ? m.note : !m.ranges?.length ? "（划线）" : ""));
+    }, r)) : null, m.note ? m.note : !m.ranges?.length && (m.highlight || !m.bookmark) ? "（划线）" : ""));
   }));
 }
 function AsksTab({ book, display, asks, onGo }) {

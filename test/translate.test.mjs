@@ -305,3 +305,21 @@ test('目录排在队首先译，正文翻译沿用目录里的章名', async ()
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('setMark：书签单独存在也保留，取消后整条删掉', async () => {
+  const { store, dir } = await tempStore()
+  try {
+    const book = await store.addBook(new Uint8Array([7, 8, 9]), { filename: 'c.txt', doc: BOOK })
+    let marks = await store.setMark(book.id, 'c1p2', { bookmark: true })
+    assert.equal(marks.c1p2.bookmark, true)
+    marks = await store.setMark(book.id, 'c1p2', { highlight: true })
+    assert.equal(marks.c1p2.bookmark, true)
+    marks = await store.setMark(book.id, 'c1p2', { bookmark: false })
+    assert.equal(marks.c1p2.bookmark, undefined)
+    assert.equal(marks.c1p2.highlight, true)
+    marks = await store.setMark(book.id, 'c1p2', { highlight: false })
+    assert.equal(marks.c1p2, undefined)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

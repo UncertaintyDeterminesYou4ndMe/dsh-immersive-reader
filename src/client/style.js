@@ -128,8 +128,23 @@ export const CSS = `
 .ir-root .ir-ask .ir-ask-del:hover { color: var(--ir-accent); }
 .ir-para.ir-reading { border-left: 2px solid var(--ir-accent); margin-left: -14px; padding-left: 12px; }
 .ir-root button.ir-plain.ir-reading-on { color: var(--ir-accent); }
-.ir-progress-line { height: 2px; background: var(--ir-line); flex: none; }
+.ir-progress-line { position: relative; z-index: 3; height: 2px; background: var(--ir-line); flex: none; }
 .ir-progress-line i { display: block; height: 100%; width: 0; background: var(--ir-accent); }
+/* 进度线上的标记：按钮是 10px 宽的热区，看得见的只有一道细刻度 */
+.ir-root .ir-mk { position: absolute; top: -4px; width: 10px; height: 14px; margin-left: -5px; padding: 0; border: none; border-radius: 0; background: none; cursor: pointer; }
+.ir-mk::after { content: ""; position: absolute; left: 4px; top: 4px; width: 2px; height: 6px; background: var(--ir-fg-3); }
+/* 书签做成带缺口的小书签条，和「上次读到」的细竖线分得开（有的主题强调色就是墨色） */
+.ir-mk-bookmark::after { left: 2px; top: 2px; width: 6px; height: 10px; background: var(--ir-accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
+.ir-mk-resume::after { height: 10px; background: var(--ir-fg); }
+.ir-mk:hover::after { background: var(--ir-accent); }
+.ir-mk-tip { display: none; position: absolute; top: 16px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 320px; padding: 6px 10px; background: var(--ir-bg); border: 1px solid var(--ir-fg-3); font-family: var(--ir-sans); font-size: 12px; line-height: 1.6; color: var(--ir-fg); text-align: left; white-space: normal; pointer-events: none; }
+.ir-mk-tip.ir-tip-l { left: 0; transform: none; }
+.ir-mk-tip.ir-tip-r { left: auto; right: 0; transform: none; }
+.ir-mk-tip b { display: block; font-weight: normal; color: var(--ir-fg-2); }
+.ir-mk:hover .ir-mk-tip, .ir-mk:focus-visible .ir-mk-tip { display: block; }
+/* 加了书签的段落：左边一道细竖线 */
+.ir-bookmarked { position: relative; }
+.ir-bookmarked::after { content: ""; position: absolute; left: -14px; top: .4em; width: 2px; height: 1.1em; background: var(--ir-accent); }
 .ir-root[data-font="sans"] .ir-page { font-family: var(--ir-sans); letter-spacing: 0; }
 .ir-root[data-font="sans"] .ir-src { font-family: var(--ir-sans); }
 .ir-booktab code { font-family: var(--ir-mono); font-size: .9em; word-break: break-all; }

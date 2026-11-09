@@ -66,3 +66,9 @@ test('notesMarkdown：导读上的追问排在对应章节最前', () => {
   assert.ok(one >= 0 && markdown.indexOf('全书回答') > one && markdown.indexOf('全书回答') < two)
   assert.ok(markdown.indexOf('**本章导读**') > two && markdown.indexOf('石碑的回答') < markdown.indexOf('段落回答'))
 })
+
+test('notesMarkdown：只有书签的段落不进笔记，书签加在划线段上不影响', () => {
+  const { markdown, count } = notesMarkdown(BOOK, TRANS, { c1p3: { bookmark: true }, c1p2: { ranges: ['阿尔法'], bookmark: true } }, [])
+  assert.equal(count, 1)
+  assert.ok(markdown.includes('> 阿尔法\n') && !markdown.includes('贝塔'))
+})

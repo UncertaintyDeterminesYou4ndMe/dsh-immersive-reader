@@ -142,9 +142,12 @@ export const CSS = `
 .ir-mk-tip.ir-tip-r { left: auto; right: 0; transform: none; }
 .ir-mk-tip b { display: block; font-weight: normal; color: var(--ir-fg-2); }
 .ir-mk:hover .ir-mk-tip, .ir-mk:focus-visible .ir-mk-tip { display: block; }
-/* 加了书签的段落：左边一道细竖线 */
+/* 加了书签的段落：左边距里一枚小书签，形状和进度线上的一致 */
 .ir-bookmarked { position: relative; }
-.ir-bookmarked::after { content: ""; position: absolute; left: -14px; top: .4em; width: 2px; height: 1.1em; background: var(--ir-accent); }
+.ir-bookmarked::after { content: ""; position: absolute; left: -18px; top: .35em; width: 8px; height: 12px; background: var(--ir-accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
+.ir-root button.ir-icon { display: inline-flex; align-items: center; padding: 2px 4px; }
+.ir-root button.ir-icon svg { display: block; }
+.ir-root button.ir-icon.ir-on { color: var(--ir-accent); }
 .ir-root[data-font="sans"] .ir-page { font-family: var(--ir-sans); letter-spacing: 0; }
 .ir-root[data-font="sans"] .ir-src { font-family: var(--ir-sans); }
 .ir-booktab code { font-family: var(--ir-mono); font-size: .9em; word-break: break-all; }

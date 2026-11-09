@@ -259,9 +259,12 @@ var CSS = `
 .ir-mk-tip.ir-tip-r { left: auto; right: 0; transform: none; }
 .ir-mk-tip b { display: block; font-weight: normal; color: var(--ir-fg-2); }
 .ir-mk:hover .ir-mk-tip, .ir-mk:focus-visible .ir-mk-tip { display: block; }
-/* 加了书签的段落：左边一道细竖线 */
+/* 加了书签的段落：左边距里一枚小书签，形状和进度线上的一致 */
 .ir-bookmarked { position: relative; }
-.ir-bookmarked::after { content: ""; position: absolute; left: -14px; top: .4em; width: 2px; height: 1.1em; background: var(--ir-accent); }
+.ir-bookmarked::after { content: ""; position: absolute; left: -18px; top: .35em; width: 8px; height: 12px; background: var(--ir-accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
+.ir-root button.ir-icon { display: inline-flex; align-items: center; padding: 2px 4px; }
+.ir-root button.ir-icon svg { display: block; }
+.ir-root button.ir-icon.ir-on { color: var(--ir-accent); }
 .ir-root[data-font="sans"] .ir-page { font-family: var(--ir-sans); letter-spacing: 0; }
 .ir-root[data-font="sans"] .ir-src { font-family: var(--ir-sans); }
 .ir-booktab code { font-family: var(--ir-mono); font-size: .9em; word-break: break-all; }
@@ -577,6 +580,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   const speech = import_react2.useRef({ token: 0 });
   const display = settings.display ?? "zh";
   const tocRunning = import_react2.useRef(false);
+  const bookmarkRef = import_react2.useRef(null);
   const [resume, setResume] = import_react2.useState(null);
   const loadBook = import_react2.useCallback(async () => {
     const info = await api.book(bookId);
@@ -638,6 +642,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     }
     root.scrollTop = 0;
     progressRef.current?.(0);
+    bookmarkRef.current?.(chapter.paragraphs[0]?.id ?? null);
   }, [chapter?.id]);
   const unfinished = import_react2.useMemo(() => chapter ? chapter.paragraphs.some((p) => p.kind !== "img" && !p.zh) : false, [chapter]);
   const busy = status ? (status.queued ?? 0) + (status.running ?? 0) > 0 : false;
@@ -662,24 +667,27 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
       loadBook().catch(() => {});
     tocRunning.current = tocBusy;
   }, [tocBusy, loadBook]);
+  const topParagraph = import_react2.useCallback(() => {
+    const root = scrollRef.current;
+    if (!root)
+      return { current: null, index: 0, nodes: [] };
+    const top = root.getBoundingClientRect().top + 8;
+    const nodes = root.querySelectorAll("[data-para]");
+    for (let i = 0;i < nodes.length; i++) {
+      if (nodes[i].getBoundingClientRect().bottom >= top)
+        return { current: nodes[i].dataset.para, index: i, nodes };
+    }
+    return { current: null, index: 0, nodes };
+  }, []);
   const onScroll = import_react2.useCallback(() => {
     const root = scrollRef.current;
     if (!root || !chapter)
       return;
-    const top = root.getBoundingClientRect().top + 8;
-    const nodes = root.querySelectorAll("[data-para]");
-    let current = null;
-    let index = 0;
-    for (let i = 0;i < nodes.length; i++) {
-      if (nodes[i].getBoundingClientRect().bottom >= top) {
-        current = nodes[i].dataset.para;
-        index = i;
-        break;
-      }
-    }
+    const { current, index, nodes } = topParagraph();
     if (!current)
       return;
     currentPara.current = current;
+    bookmarkRef.current?.(current);
     const atEnd = root.scrollTop + root.clientHeight >= root.scrollHeight - 4;
     progressRef.current?.(atEnd ? nodes.length : index);
     seenParas.current.add(current);
@@ -691,7 +699,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
       lastSaved.current = key;
       api.saveState(bookId, { chapterId: chapter.id, paraId: current }).then((r) => setStatus(r.status)).catch(() => {});
     }, 1200);
-  }, [bookId, chapter]);
+  }, [bookId, chapter, topParagraph]);
   import_react2.useEffect(() => {
     const onKey = (e) => {
       const tag = (e.target?.tagName || "").toLowerCase();
@@ -814,9 +822,11 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   const toggleBookmark = () => {
     if (!chapter)
       return;
-    const pid = chapter.paragraphs.some((p) => p.id === currentPara.current) ? currentPara.current : chapter.paragraphs[0]?.id;
-    if (pid)
-      setMark(pid, { bookmark: !marks[pid]?.bookmark });
+    const pid = topParagraph().current ?? chapter.paragraphs[0]?.id;
+    if (!pid)
+      return;
+    bookmarkRef.current?.(pid);
+    setMark(pid, { bookmark: !marks[pid]?.bookmark });
   };
   const asksBy = import_react2.useMemo(() => {
     const m = {};
@@ -958,11 +968,13 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     className: "ir-plain",
     onClick: cycleDisplay,
     title: "切换显示：译文 / 双语 / 原文"
-  }, DISPLAY_LABEL[display]), /* @__PURE__ */ import_react2.default.createElement("button", {
-    className: "ir-plain",
-    onClick: toggleBookmark,
-    title: "在当前位置加书签，再按一次取消（快捷键 B）"
-  }, "书签"), /* @__PURE__ */ import_react2.default.createElement("button", {
+  }, DISPLAY_LABEL[display]), /* @__PURE__ */ import_react2.default.createElement(BookmarkButton, {
+    marks,
+    onToggle: toggleBookmark,
+    register: (fn) => {
+      bookmarkRef.current = fn;
+    }
+  }), /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-plain",
     onClick: () => setDrawer(drawer === "toc" ? "" : "toc")
   }, "目录"), /* @__PURE__ */ import_react2.default.createElement("button", {
@@ -1075,6 +1087,33 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
       }
     }
   }) : null);
+}
+function BookmarkButton({ marks, onToggle, register }) {
+  const [pid, setPid] = import_react2.useState(null);
+  import_react2.useEffect(() => {
+    register(setPid);
+    return () => register(null);
+  }, [register]);
+  const on = Boolean(pid && marks?.[pid]?.bookmark);
+  return /* @__PURE__ */ import_react2.default.createElement("button", {
+    className: `ir-plain ir-icon${on ? " ir-on" : ""}`,
+    onClick: onToggle,
+    "aria-pressed": on,
+    "aria-label": on ? "取消书签" : "加书签",
+    title: `${on ? "取消这里的书签" : "在当前位置加书签"}（快捷键 B）`
+  }, /* @__PURE__ */ import_react2.default.createElement("svg", {
+    width: "18",
+    height: "18",
+    viewBox: "0 0 24 24",
+    fill: on ? "currentColor" : "none",
+    stroke: "currentColor",
+    strokeWidth: "1.8",
+    strokeLinejoin: "round",
+    "aria-hidden": "true",
+    focusable: "false"
+  }, /* @__PURE__ */ import_react2.default.createElement("path", {
+    d: "M7 3.5h10v17l-5-4.2-5 4.2z"
+  })));
 }
 function ProgressLine({ total, register, markers = [], onJump }) {
   const [index, setIndex] = import_react2.useState(0);

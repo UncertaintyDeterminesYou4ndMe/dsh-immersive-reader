@@ -54,6 +54,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const speech = useRef({ token: 0 })
   const display = settings.display ?? 'zh'
   const tocRunning = useRef(false)
+  const bookmarkRef = useRef(null) // 顶栏书签按钮：告诉它当前在哪一段，好显示实心/空心
   const [resume, setResume] = useState(null) // 打开书时的阅读位置，进度线上标「上次读到」
 
   const loadBook = useCallback(async () => {
@@ -106,6 +107,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     }
     root.scrollTop = 0
     progressRef.current?.(0)
+    bookmarkRef.current?.(chapter.paragraphs[0]?.id ?? null)
   }, [chapter?.id])
 
   // 翻译没完成时轮询本章
@@ -134,18 +136,25 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   }, [tocBusy, loadBook])
 
   // 阅读位置：视口最上面的段落
+  // 视口最上面的段落：滚动时和加书签时都现量，不依赖滚动事件有没有来过
+  const topParagraph = useCallback(() => {
+    const root = scrollRef.current
+    if (!root) return { current: null, index: 0, nodes: [] }
+    const top = root.getBoundingClientRect().top + 8
+    const nodes = root.querySelectorAll('[data-para]')
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].getBoundingClientRect().bottom >= top) return { current: nodes[i].dataset.para, index: i, nodes }
+    }
+    return { current: null, index: 0, nodes }
+  }, [])
+
   const onScroll = useCallback(() => {
     const root = scrollRef.current
     if (!root || !chapter) return
-    const top = root.getBoundingClientRect().top + 8
-    const nodes = root.querySelectorAll('[data-para]')
-    let current = null
-    let index = 0
-    for (let i = 0; i < nodes.length; i++) {
-      if (nodes[i].getBoundingClientRect().bottom >= top) { current = nodes[i].dataset.para; index = i; break }
-    }
+    const { current, index, nodes } = topParagraph()
     if (!current) return
     currentPara.current = current
+    bookmarkRef.current?.(current)
     const atEnd = root.scrollTop + root.clientHeight >= root.scrollHeight - 4
     progressRef.current?.(atEnd ? nodes.length : index)
     seenParas.current.add(current)
@@ -156,7 +165,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
       lastSaved.current = key
       api.saveState(bookId, { chapterId: chapter.id, paraId: current }).then(r => setStatus(r.status)).catch(() => {})
     }, 1200)
-  }, [bookId, chapter])
+  }, [bookId, chapter, topParagraph])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -243,8 +252,10 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   // 书签：加在视口最上面那段；再按一次取消
   const toggleBookmark = () => {
     if (!chapter) return
-    const pid = chapter.paragraphs.some(p => p.id === currentPara.current) ? currentPara.current : chapter.paragraphs[0]?.id
-    if (pid) setMark(pid, { bookmark: !marks[pid]?.bookmark })
+    const pid = topParagraph().current ?? chapter.paragraphs[0]?.id
+    if (!pid) return
+    bookmarkRef.current?.(pid)
+    setMark(pid, { bookmark: !marks[pid]?.bookmark })
   }
   const asksBy = useMemo(() => {
     const m = {}
@@ -329,7 +340,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
           <span className={`ir-status${busy ? ' ir-busy' : ''}`} title={statusText(status, unfinished)}>{statusText(status, unfinished)}</span>
           {canSpeak ? <button className={`ir-plain${reading ? ' ir-reading-on' : ''}`} onClick={() => reading ? stopReading() : startReading()} title={reading ? '停止朗读' : '从当前位置朗读译文（原文模式读原文）'}>{reading ? '停止' : '朗读'}</button> : null}
           <button className="ir-plain" onClick={cycleDisplay} title="切换显示：译文 / 双语 / 原文">{DISPLAY_LABEL[display]}</button>
-          <button className="ir-plain" onClick={toggleBookmark} title="在当前位置加书签，再按一次取消（快捷键 B）">书签</button>
+          <BookmarkButton marks={marks} onToggle={toggleBookmark} register={fn => { bookmarkRef.current = fn }} />
           <button className="ir-plain" onClick={() => setDrawer(drawer === 'toc' ? '' : 'toc')}>目录</button>
           <button className="ir-plain" onClick={onSettings}>设置</button>
         </div>
@@ -385,6 +396,20 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
 }
 
 /** 顶栏下的 2px 进度线：本章读到哪了。靠 register 回调从滚动事件直接更新，不让整章重渲染。 */
+/** 顶栏书签按钮：当前段有书签时实心。当前段由滚动回调直接推过来，不让整章重渲染。 */
+function BookmarkButton({ marks, onToggle, register }) {
+  const [pid, setPid] = useState(null)
+  useEffect(() => { register(setPid); return () => register(null) }, [register])
+  const on = Boolean(pid && marks?.[pid]?.bookmark)
+  return (
+    <button className={`ir-plain ir-icon${on ? ' ir-on' : ''}`} onClick={onToggle} aria-pressed={on} aria-label={on ? '取消书签' : '加书签'} title={`${on ? '取消这里的书签' : '在当前位置加书签'}（快捷键 B）`}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill={on ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        <path d="M7 3.5h10v17l-5-4.2-5 4.2z" />
+      </svg>
+    </button>
+  )
+}
+
 function ProgressLine({ total, register, markers = [], onJump }) {
   const [index, setIndex] = useState(0)
   useEffect(() => { register(setIndex); return () => register(null) }, [register])

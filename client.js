@@ -155,6 +155,8 @@ var CSS = `
 .ir-bar .ir-right { display: flex; gap: 6px; align-items: center; flex: none; }
 
 .ir-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* 宿主在 macOS 上没有系统标题栏：带 data-window-drag 的元素才能拖动窗口（按钮等自动排除）。书架没有顶栏，留一条和宿主插件页同高的拖动带。 */
+.ir-dragband { flex: none; height: var(--dsh-frame-top-clearance, 0px); }
 .ir-empty { padding: 48px 24px; color: var(--ir-fg-2); text-align: center; }
 .ir-error { color: var(--ir-accent); padding: 8px 16px; border-bottom: 1px solid var(--ir-line); }
 .ir-hint { color: var(--ir-fg-2); font-size: 13px; }
@@ -394,7 +396,10 @@ function Shelf({ settings, onOpen, onSettings }) {
       setError(e.message);
     }
   };
-  return /* @__PURE__ */ import_react.default.createElement("div", {
+  return /* @__PURE__ */ import_react.default.createElement(import_react.default.Fragment, null, /* @__PURE__ */ import_react.default.createElement("div", {
+    className: "ir-dragband",
+    "data-window-drag": ""
+  }), /* @__PURE__ */ import_react.default.createElement("div", {
     className: "ir-scroll"
   }, /* @__PURE__ */ import_react.default.createElement("div", {
     className: "ir-shelf"
@@ -466,7 +471,7 @@ function Shelf({ settings, onOpen, onSettings }) {
   }, /* @__PURE__ */ import_react.default.createElement("button", {
     className: "ir-plain",
     onClick: () => remove(book)
-  }, "删除"))))));
+  }, "删除")))))));
 }
 
 // src/client/Reader.jsx
@@ -865,7 +870,8 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     className: "ir-root-inner",
     style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0, position: "relative" }
   }, /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-bar"
+    className: "ir-bar",
+    "data-window-drag": ""
   }, /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-plain",
     onClick: onBack
@@ -1924,7 +1930,8 @@ function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBo
     } catch {}
   };
   return /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-drawer"
+    className: "ir-drawer",
+    "data-window-drag-recall": ""
   }, /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-bar"
   }, /* @__PURE__ */ import_react2.default.createElement("div", {
@@ -2058,7 +2065,8 @@ function Settings({ settings, onChange, onBack }) {
   return /* @__PURE__ */ import_react3.default.createElement("div", {
     style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }
   }, /* @__PURE__ */ import_react3.default.createElement("div", {
-    className: "ir-bar"
+    className: "ir-bar",
+    "data-window-drag": ""
   }, /* @__PURE__ */ import_react3.default.createElement("button", {
     className: "ir-plain",
     onClick: onBack

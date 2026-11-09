@@ -56,6 +56,8 @@ export function Shelf({ settings, onOpen, onSettings }) {
   }
 
   return (
+    <>
+    <div className="ir-dragband" data-window-drag="" />
     <div className="ir-scroll">
       <div className="ir-shelf">
         <h1>阅读室</h1>
@@ -91,5 +93,6 @@ export function Shelf({ settings, onOpen, onSettings }) {
         ))}
       </div>
     </div>
+    </>
   )
 }

@@ -281,7 +281,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
 
   return (
     <div className="ir-root-inner" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
-      <div className="ir-bar">
+      <div className="ir-bar" data-window-drag="">
         <button className="ir-plain" onClick={onBack}>‹ 书架</button>
         <div className="ir-title">{book ? book.title : '…'}{chapter ? <small>{chapter.title}</small> : null}</div>
         <div className="ir-right">
@@ -891,7 +891,7 @@ function TocDrawer({ book, current, marks, asks, initialTab, onClose, onGo, onBo
     try { setGlossary(await api.glossary(book.id, { remove: t })); onBookChanged() } catch { /* 忽略 */ }
   }
   return (
-    <div className="ir-drawer">
+    <div className="ir-drawer" data-window-drag-recall="">
       <div className="ir-bar">
         <div className="ir-title">{book.title}</div>
         <div className="ir-right"><button className="ir-plain" onClick={onClose}>关闭</button></div>

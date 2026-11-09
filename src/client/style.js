@@ -38,6 +38,8 @@ export const CSS = `
 .ir-bar .ir-right { display: flex; gap: 6px; align-items: center; flex: none; }
 
 .ir-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* 宿主在 macOS 上没有系统标题栏：带 data-window-drag 的元素才能拖动窗口（按钮等自动排除）。书架没有顶栏，留一条和宿主插件页同高的拖动带。 */
+.ir-dragband { flex: none; height: var(--dsh-frame-top-clearance, 0px); }
 .ir-empty { padding: 48px 24px; color: var(--ir-fg-2); text-align: center; }
 .ir-error { color: var(--ir-accent); padding: 8px 16px; border-bottom: 1px solid var(--ir-line); }
 .ir-hint { color: var(--ir-fg-2); font-size: 13px; }

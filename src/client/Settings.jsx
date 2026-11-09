@@ -20,7 +20,7 @@ export function Settings({ settings, onChange, onBack }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <div className="ir-bar">
+      <div className="ir-bar" data-window-drag="">
         <button className="ir-plain" onClick={onBack}>‹ 返回</button>
         <div className="ir-title">设置</div>
         <div className="ir-right"><button className="ir-primary" onClick={save} disabled={saving}>{saving ? '保存中…' : '保存'}</button></div>

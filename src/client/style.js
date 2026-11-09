@@ -183,6 +183,9 @@ export const CSS = `
 .ir-toc-item { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--ir-line); padding: 9px 16px; border-radius: 0; }
 .ir-toc-item:hover { background: var(--ir-bg-2); border-color: var(--ir-line); }
 .ir-toc-item.ir-current { border-left: 2px solid var(--ir-accent); }
+.ir-toc-item { position: relative; }
+.ir-toc-read { position: absolute; left: 0; bottom: -1px; height: 2px; background: var(--ir-fg-2); pointer-events: none; }
+.ir-toc-item.ir-current .ir-toc-read { background: var(--ir-accent); }
 .ir-toc-item .ir-toc-title { flex: 1; min-width: 0; font-family: var(--ir-serif); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ir-toc-item .ir-toc-count { font-family: var(--ir-mono); font-size: 12px; color: var(--ir-fg-2); flex: none; }
 .ir-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--ir-line); overflow-x: auto; }

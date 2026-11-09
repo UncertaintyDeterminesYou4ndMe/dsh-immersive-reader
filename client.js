@@ -300,6 +300,9 @@ var CSS = `
 .ir-toc-item { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--ir-line); padding: 9px 16px; border-radius: 0; }
 .ir-toc-item:hover { background: var(--ir-bg-2); border-color: var(--ir-line); }
 .ir-toc-item.ir-current { border-left: 2px solid var(--ir-accent); }
+.ir-toc-item { position: relative; }
+.ir-toc-read { position: absolute; left: 0; bottom: -1px; height: 2px; background: var(--ir-fg-2); pointer-events: none; }
+.ir-toc-item.ir-current .ir-toc-read { background: var(--ir-accent); }
 .ir-toc-item .ir-toc-title { flex: 1; min-width: 0; font-family: var(--ir-serif); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ir-toc-item .ir-toc-count { font-family: var(--ir-mono); font-size: 12px; color: var(--ir-fg-2); flex: none; }
 .ir-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--ir-line); overflow-x: auto; }
@@ -587,6 +590,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   const tocRunning = import_react2.useRef(false);
   const bookmarkRef = import_react2.useRef(null);
   const [resume, setResume] = import_react2.useState(null);
+  const [liveReach, setLiveReach] = import_react2.useState({});
   const loadBook = import_react2.useCallback(async () => {
     const info = await api.book(bookId);
     setBook(info);
@@ -696,13 +700,16 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     const atEnd = root.scrollTop + root.clientHeight >= root.scrollHeight - 4;
     progressRef.current?.(atEnd ? nodes.length : index);
     seenParas.current.add(current);
-    const key = `${chapter.id}:${current}`;
+    const progress = atEnd ? 1 : nodes.length ? index / nodes.length : 0;
+    const key = `${chapter.id}:${current}:${atEnd}`;
     if (key === lastSaved.current)
       return;
     clearTimeout(stateTimer.current);
     stateTimer.current = setTimeout(() => {
       lastSaved.current = key;
-      api.saveState(bookId, { chapterId: chapter.id, paraId: current }).then((r) => setStatus(r.status)).catch(() => {});
+      const cid = chapter.id;
+      setLiveReach((prev) => progress > (prev[cid] ?? 0) ? { ...prev, [cid]: progress } : prev);
+      api.saveState(bookId, { chapterId: cid, paraId: current, progress }).then((r) => setStatus(r.status)).catch(() => {});
     }, 1200);
   }, [bookId, chapter, topParagraph]);
   import_react2.useEffect(() => {
@@ -1077,6 +1084,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     current: chapter?.id,
     marks,
     asks,
+    liveReach,
     onClose: () => setDrawer(""),
     onGo: goChapter,
     onBookChanged: loadBook,
@@ -2218,7 +2226,7 @@ function AsksTab({ book, display, asks, onGo }) {
     }, head), String(a.answer ?? "").slice(0, 90), a.answer && a.answer.length > 90 ? "…" : ""));
   }));
 }
-function TocDrawer({ book, display, current, marks, asks, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
+function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = import_react2.useState(initialTab || "toc");
   const [term, setTerm] = import_react2.useState("");
   const [zh, setZh] = import_react2.useState("");
@@ -2284,16 +2292,25 @@ function TocDrawer({ book, display, current, marks, asks, initialTab, onClose, o
   }, "本书")), /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-drawer-body",
     ref: listRef
-  }, tab === "toc" ? book.chapters.map((c) => /* @__PURE__ */ import_react2.default.createElement("button", {
-    key: c.id,
-    className: `ir-toc-item${c.id === current ? " ir-current" : ""}`,
-    onClick: () => onGo(c.id)
-  }, /* @__PURE__ */ import_react2.default.createElement("span", {
-    className: "ir-toc-title",
-    title: c.title
-  }, tt(c, display)), /* @__PURE__ */ import_react2.default.createElement("span", {
-    className: "ir-toc-count"
-  }, c.translated, "/", c.translatable ?? c.paragraphs))) : null, tab === "book" ? /* @__PURE__ */ import_react2.default.createElement(BookTab, {
+  }, tab === "toc" ? book.chapters.map((c) => {
+    const read = Math.max(c.read ?? 0, liveReach?.[c.id] ?? 0);
+    const pct = Math.round(read * 100);
+    return /* @__PURE__ */ import_react2.default.createElement("button", {
+      key: c.id,
+      className: `ir-toc-item${c.id === current ? " ir-current" : ""}`,
+      onClick: () => onGo(c.id),
+      title: `${c.title}
+读到 ${pct}% · 已译 ${c.translated}/${c.translatable ?? c.paragraphs} 段`
+    }, /* @__PURE__ */ import_react2.default.createElement("span", {
+      className: "ir-toc-title"
+    }, tt(c, display)), /* @__PURE__ */ import_react2.default.createElement("span", {
+      className: "ir-toc-count"
+    }, c.translated, "/", c.translatable ?? c.paragraphs), pct > 0 ? /* @__PURE__ */ import_react2.default.createElement("i", {
+      className: "ir-toc-read",
+      style: { width: `${pct}%` },
+      "aria-hidden": "true"
+    }) : null);
+  }) : null, tab === "book" ? /* @__PURE__ */ import_react2.default.createElement(BookTab, {
     book,
     chapterId: current,
     onRetranslateChapter

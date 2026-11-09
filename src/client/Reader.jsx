@@ -56,6 +56,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const tocRunning = useRef(false)
   const bookmarkRef = useRef(null) // 顶栏书签按钮：告诉它当前在哪一段，好显示实心/空心
   const [resume, setResume] = useState(null) // 打开书时的阅读位置，进度线上标「上次读到」
+  const [liveReach, setLiveReach] = useState({}) // 这次打开后各章读到的比例，盖在 book.chapters[].read 上，目录里画进度
 
   const loadBook = useCallback(async () => {
     const info = await api.book(bookId)
@@ -158,12 +159,15 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     const atEnd = root.scrollTop + root.clientHeight >= root.scrollHeight - 4
     progressRef.current?.(atEnd ? nodes.length : index)
     seenParas.current.add(current)
-    const key = `${chapter.id}:${current}`
+    const progress = atEnd ? 1 : nodes.length ? index / nodes.length : 0
+    const key = `${chapter.id}:${current}:${atEnd}`
     if (key === lastSaved.current) return
     clearTimeout(stateTimer.current)
     stateTimer.current = setTimeout(() => {
       lastSaved.current = key
-      api.saveState(bookId, { chapterId: chapter.id, paraId: current }).then(r => setStatus(r.status)).catch(() => {})
+      const cid = chapter.id
+      setLiveReach(prev => (progress > (prev[cid] ?? 0) ? { ...prev, [cid]: progress } : prev))
+      api.saveState(bookId, { chapterId: cid, paraId: current, progress }).then(r => setStatus(r.status)).catch(() => {})
     }, 1200)
   }, [bookId, chapter, topParagraph])
 
@@ -386,7 +390,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
         <TocDrawer
           key={drawer}
           initialTab={drawer === 'toc:book' ? 'book' : 'toc'}
-          book={book} display={display} current={chapter?.id} marks={marks} asks={asks}
+          book={book} display={display} current={chapter?.id} marks={marks} asks={asks} liveReach={liveReach}
           onClose={() => setDrawer('')} onGo={goChapter} onBookChanged={loadBook}
           onRetranslateChapter={async () => { if (!chapter) return; try { const r = await api.translate(bookId, { chapterId: chapter.id, force: true }); setStatus(r.status); setDrawer('') } catch (e) { setError(e.message) } }}
         />
@@ -1075,7 +1079,7 @@ function AsksTab({ book, display, asks, onGo }) {
   )
 }
 
-function TocDrawer({ book, display, current, marks, asks, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
+function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = useState(initialTab || 'toc')
   const [term, setTerm] = useState('')
   const [zh, setZh] = useState('')
@@ -1108,12 +1112,17 @@ function TocDrawer({ book, display, current, marks, asks, initialTab, onClose, o
         <button className={tab === 'book' ? 'ir-on' : ''} onClick={() => setTab('book')}>本书</button>
       </div>
       <div className="ir-drawer-body" ref={listRef}>
-        {tab === 'toc' ? book.chapters.map(c => (
-          <button key={c.id} className={`ir-toc-item${c.id === current ? ' ir-current' : ''}`} onClick={() => onGo(c.id)}>
-            <span className="ir-toc-title" title={c.title}>{tt(c, display)}</span>
-            <span className="ir-toc-count">{c.translated}/{c.translatable ?? c.paragraphs}</span>
-          </button>
-        )) : null}
+        {tab === 'toc' ? book.chapters.map(c => {
+          const read = Math.max(c.read ?? 0, liveReach?.[c.id] ?? 0)
+          const pct = Math.round(read * 100)
+          return (
+            <button key={c.id} className={`ir-toc-item${c.id === current ? ' ir-current' : ''}`} onClick={() => onGo(c.id)} title={`${c.title}\n读到 ${pct}% · 已译 ${c.translated}/${c.translatable ?? c.paragraphs} 段`}>
+              <span className="ir-toc-title">{tt(c, display)}</span>
+              <span className="ir-toc-count">{c.translated}/{c.translatable ?? c.paragraphs}</span>
+              {pct > 0 ? <i className="ir-toc-read" style={{ width: `${pct}%` }} aria-hidden="true" /> : null}
+            </button>
+          )
+        }) : null}
         {tab === 'book' ? <BookTab book={book} chapterId={current} onRetranslateChapter={onRetranslateChapter} /> : null}
         {tab === 'search' ? <SearchTab book={book} onGo={onGo} /> : null}
         {tab === 'marks' ? <MarksTab book={book} display={display} marks={marks} onGo={onGo} /> : null}

@@ -32,7 +32,7 @@ export const CSS = `
 .ir-root input:focus, .ir-root select:focus, .ir-root textarea:focus { outline: none; border-color: var(--ir-fg-2); }
 .ir-root a { color: var(--ir-accent); }
 
-.ir-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--ir-line); min-height: 44px; flex: none; }
+.ir-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; padding-left: max(16px, var(--dsh-frame-leading-clearance, 0px)); border-bottom: 1px solid var(--ir-line); min-height: 44px; flex: none; }
 .ir-bar .ir-title { font-family: var(--ir-serif); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
 .ir-bar .ir-title small { color: var(--ir-fg-2); font-family: var(--ir-sans); font-size: 12px; margin-left: 8px; }
 .ir-bar .ir-right { display: flex; gap: 6px; align-items: center; flex: none; }
@@ -179,7 +179,7 @@ export const CSS = `
 .ir-seg button.ir-on { color: var(--ir-fg); background: var(--ir-bg-2); }
 
 @media (max-width: 640px) {
-  .ir-bar { padding: 8px 10px; }
+  .ir-bar { padding: 8px 10px; padding-left: max(10px, var(--dsh-frame-leading-clearance, 0px)); }
   .ir-page { padding: 20px 16px 120px; }
   .ir-field { grid-template-columns: 1fr; }
   .ir-field .ir-field-help { grid-column: 1; }

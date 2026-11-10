@@ -300,9 +300,11 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     try { const recall = await api.recall(bookId); setSession(s => s ? { ...s, recall } : s) } catch (e) { setError(e.message) } finally { setRecalling(false) }
   }
 
+  // 目录和正文并排时（宽度够，见样式里的 @container）跳章不关目录；盖在正文上时才关，不然看不到跳到的地方
+  const rootRef = useRef(null)
   const goChapter = async (cid, paraId = null) => {
     if (!cid) return
-    setDrawer('')
+    if ((rootRef.current?.getBoundingClientRect().width ?? 0) < 960) setDrawer('')
     try {
       if (chapter && chapter.id === cid && paraId) {
         const el = scrollRef.current?.querySelector(`[data-para="${paraId}"]`)
@@ -347,7 +349,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const chapterMinutes = chapter ? minutesOf(chapter.paragraphs) : 0
 
   return (
-    <div className={`ir-root-inner${drawer ? ' ir-has-drawer' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
+    <div ref={rootRef} className={`ir-root-inner${drawer ? ' ir-has-drawer' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
       <div className="ir-bar" data-window-drag="">
         <button className="ir-plain" onClick={onBack}>‹ 书架</button>
         <div className="ir-title" title={book ? book.title : ''}>{book ? tt(book, display) : '…'}{chapter ? <small>{tt(chapter, display)}</small> : null}</div>

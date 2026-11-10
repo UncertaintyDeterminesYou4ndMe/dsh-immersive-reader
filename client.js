@@ -913,10 +913,12 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
       setRecalling(false);
     }
   };
+  const rootRef = import_react2.useRef(null);
   const goChapter = async (cid, paraId = null) => {
     if (!cid)
       return;
-    setDrawer("");
+    if ((rootRef.current?.getBoundingClientRect().width ?? 0) < 960)
+      setDrawer("");
     try {
       if (chapter && chapter.id === cid && paraId) {
         const el = scrollRef.current?.querySelector(`[data-para="${paraId}"]`);
@@ -974,6 +976,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   }, [chapter, marks, asksBy, resume, display]);
   const chapterMinutes = chapter ? minutesOf(chapter.paragraphs) : 0;
   return /* @__PURE__ */ import_react2.default.createElement("div", {
+    ref: rootRef,
     className: `ir-root-inner${drawer ? " ir-has-drawer" : ""}`,
     style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0, position: "relative" }
   }, /* @__PURE__ */ import_react2.default.createElement("div", {

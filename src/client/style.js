@@ -37,7 +37,7 @@ export const CSS = `
 .ir-bar .ir-title small { color: var(--ir-fg-2); font-family: var(--ir-sans); font-size: 12px; margin-left: 8px; }
 .ir-bar .ir-right { display: flex; gap: 6px; align-items: center; flex: none; }
 
-.ir-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.ir-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 /* 宿主在 macOS 上没有系统标题栏：带 data-window-drag 的元素才能拖动窗口（按钮等自动排除）。书架没有顶栏，留一条和宿主插件页同高的拖动带。 */
 .ir-dragband { flex: none; height: var(--dsh-frame-top-clearance, 0px); }
 .ir-empty { padding: 48px 24px; color: var(--ir-fg-2); text-align: center; }
@@ -184,6 +184,16 @@ export const CSS = `
 }
 .ir-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); background: var(--ir-bg); border-left: 1px solid var(--ir-line); display: flex; flex-direction: column; z-index: 5; }
 .ir-drawer .ir-bar { padding: 8px 12px; }
+/* 过渡只有三处，都是 160ms：抽屉滑进滑出、换章淡入（正文让位的位移在 Reader 里用 transform 做） */
+.ir-drawer-in { animation: ir-drawer-in 160ms cubic-bezier(.2, 0, 0, 1); }
+.ir-drawer-out { animation: ir-drawer-out 160ms cubic-bezier(.4, 0, 1, 1) forwards; pointer-events: none; }
+@keyframes ir-drawer-in { from { transform: translateX(100%); } }
+@keyframes ir-drawer-out { to { transform: translateX(100%); } }
+.ir-page { animation: ir-fade 160ms ease-out; }
+@keyframes ir-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ir-drawer-in, .ir-drawer-out, .ir-page { animation: none; }
+}
 .ir-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 0 24px; }
 .ir-toc-item { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--ir-line); padding: 9px 16px; border-radius: 0; }
 .ir-toc-item:hover { background: var(--ir-bg-2); border-color: var(--ir-line); }

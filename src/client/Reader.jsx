@@ -7,6 +7,28 @@ const DISPLAY_ORDER = ['zh', 'bilingual', 'original']
 const ASK_LABEL = { explain: '解释', intent: '这段在说什么', custom: '追问' }
 /** 阅读时长估计：译文按 400 字/分钟；没译的段按原文字数折算（英文 → 中文约 0.3 倍） */
 const ZH_PER_MINUTE = 400
+// 过渡时长，和样式里的 ir-drawer-in / ir-drawer-out / ir-fade 一致
+const MOTION_MS = 160
+const reduceMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+
+// 同章内跳到某段：远了先瞬移到目标前不到半屏，再用 240ms 滑完。浏览器自带的 smooth 按距离算时长，跳一整章要一秒多、整章从眼前刷过去
+const glides = new WeakMap()
+function glideTo(root, el) {
+  cancelAnimationFrame(glides.get(root))
+  const max = root.scrollHeight - root.clientHeight
+  const target = Math.max(0, Math.min(max, root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top))
+  if (reduceMotion()) { root.scrollTop = target; return }
+  const lead = root.clientHeight * 0.4
+  let from = root.scrollTop
+  if (Math.abs(target - from) > lead) { from = target - Math.sign(target - from) * lead; root.scrollTop = from }
+  const t0 = performance.now()
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / 240)
+    root.scrollTop = from + (target - from) * (1 - (1 - k) ** 3)
+    if (k < 1) glides.set(root, requestAnimationFrame(step))
+  }
+  glides.set(root, requestAnimationFrame(step))
+}
 
 /** 书名、章名按阅读模式取：原文模式看原文，其余看目录译文（还没译出时退回原文）。 */
 function tt(o, display) {
@@ -36,7 +58,26 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
   const [book, setBook] = useState(null)
   const [chapter, setChapter] = useState(null)
   const [error, setError] = useState('')
-  const [drawer, setDrawer] = useState('')
+  const [drawer, setDrawerState] = useState('')
+  // 开关目录的过渡：记下正文页原来的左边位置（并排时正文会让位），关的时候抽屉先留 160ms 滑出去
+  const drawerRef = useRef('')
+  const flipFrom = useRef(null)
+  const drawerEnter = useRef(false)
+  const leaveTimer = useRef(null)
+  const [drawerLeaving, setDrawerLeaving] = useState('')
+  const setDrawer = useCallback((v) => {
+    const prev = drawerRef.current
+    if (v === prev) return
+    flipFrom.current = scrollRef.current?.querySelector('.ir-page')?.getBoundingClientRect().left ?? null
+    drawerEnter.current = !prev
+    clearTimeout(leaveTimer.current)
+    if (!v && prev && !reduceMotion()) {
+      setDrawerLeaving(prev)
+      leaveTimer.current = setTimeout(() => setDrawerLeaving(''), MOTION_MS)
+    } else setDrawerLeaving('')
+    drawerRef.current = v
+    setDrawerState(v)
+  }, [])
   const [status, setStatus] = useState(null)
   const [session, setSession] = useState(null)
   const [recalling, setRecalling] = useState(false)
@@ -183,6 +224,23 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     root.scrollTop += r.top + a.frac * r.height - (root.getBoundingClientRect().top + 8)
   }, [drawer])
 
+  // 正文让位：版面已经是新位置，先用 transform 拉回原处，再过渡到 0（只动位移，不逐帧重排文字）
+  useLayoutEffect(() => {
+    const from = flipFrom.current
+    flipFrom.current = null
+    const page = scrollRef.current?.querySelector('.ir-page')
+    if (from == null || !page || reduceMotion()) return
+    const dx = from - page.getBoundingClientRect().left
+    if (Math.abs(dx) < 1) return
+    page.style.transition = 'none'
+    page.style.transform = `translateX(${dx}px)`
+    page.getBoundingClientRect()
+    page.style.transition = `transform ${MOTION_MS}ms cubic-bezier(.2, 0, 0, 1)`
+    page.style.transform = ''
+    const t = setTimeout(() => { page.style.transition = '' }, MOTION_MS + 40)
+    return () => clearTimeout(t)
+  }, [drawer])
+
   useEffect(() => {
     const onKey = (e) => {
       const tag = (e.target?.tagName || '').toLowerCase()
@@ -308,7 +366,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
     try {
       if (chapter && chapter.id === cid && paraId) {
         const el = scrollRef.current?.querySelector(`[data-para="${paraId}"]`)
-        if (el) { el.scrollIntoView({ block: 'start' }); return }
+        if (el && scrollRef.current) { glideTo(scrollRef.current, el); return }
       }
       await loadChapter(cid, paraId)
       lastSaved.current = `${cid}:${paraId ?? ''}`
@@ -367,7 +425,7 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
       {error ? <div className="ir-error">{error} <button className="ir-link" onClick={() => setError('')}>关闭</button></div> : null}
       <div className="ir-scroll" ref={scrollRef} onScroll={onScroll}>
         {chapter ? (
-          <div className="ir-page" style={{ fontSize: `${settings.fontSize || 18}px`, lineHeight: settings.lineHeight || 1.9 }}>
+          <div key={chapter.id} className="ir-page" style={{ fontSize: `${settings.fontSize || 18}px`, lineHeight: settings.lineHeight || 1.9 }}>
             <h1 className="ir-chapter-title">{tt(chapter, display)}</h1>
             {tt(chapter, display) !== chapter.title ? <div className="ir-chapter-orig">{chapter.title}</div> : null}
             <div className="ir-chapter-sub">
@@ -400,10 +458,11 @@ export function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }
           </div>
         ) : <div className="ir-empty">{error ? '' : '打开中…'}</div>}
       </div>
-      {drawer.startsWith('toc') && book ? (
+      {(drawer || drawerLeaving).startsWith('toc') && book ? (
         <TocDrawer
-          key={drawer}
-          initialTab={drawer === 'toc:book' ? 'book' : 'toc'}
+          key={drawer || drawerLeaving}
+          motion={!drawer ? 'out' : drawerEnter.current ? 'in' : ''}
+          initialTab={(drawer || drawerLeaving) === 'toc:book' ? 'book' : 'toc'}
           book={book} display={display} current={chapter?.id} marks={marks} asks={asks} liveReach={liveReach}
           onClose={() => setDrawer('')} onGo={goChapter} onBookChanged={loadBook}
           onRetranslateChapter={async () => { if (!chapter) return; try { const r = await api.translate(bookId, { chapterId: chapter.id, force: true }); setStatus(r.status); setDrawer('') } catch (e) { setError(e.message) } }}
@@ -1093,15 +1152,17 @@ function AsksTab({ book, display, asks, onGo }) {
   )
 }
 
-function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
+function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, motion, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = useState(initialTab || 'toc')
   const [term, setTerm] = useState('')
   const [zh, setZh] = useState('')
   const [glossary, setGlossary] = useState(book.glossary ?? [])
   const listRef = useRef(null)
   useEffect(() => {
-    const el = listRef.current?.querySelector('.ir-current')
-    if (el) el.scrollIntoView({ block: 'center' })
+    // 只滚列表自己。scrollIntoView 会连外层一起滚，抽屉滑入时还在屏幕外，dsh 的整列会被横向带偏
+    const list = listRef.current
+    const el = list?.querySelector('.ir-current')
+    if (el) list.scrollTop += el.getBoundingClientRect().top - list.getBoundingClientRect().top - (list.clientHeight - el.offsetHeight) / 2
   }, [])
   const addTerm = async () => {
     if (!term.trim() || !zh.trim()) return
@@ -1111,7 +1172,7 @@ function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab,
     try { setGlossary(await api.glossary(book.id, { remove: t })); onBookChanged() } catch { /* 忽略 */ }
   }
   return (
-    <div className="ir-drawer" data-window-drag-recall="">
+    <div className={`ir-drawer${motion ? ` ir-drawer-${motion}` : ''}`} data-window-drag-recall="">
       <div className="ir-bar">
         <div className="ir-title" title={book.title}>{tt(book, display)}</div>
         <div className="ir-right"><button className="ir-plain" onClick={onClose}>关闭</button></div>

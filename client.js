@@ -154,7 +154,7 @@ var CSS = `
 .ir-bar .ir-title small { color: var(--ir-fg-2); font-family: var(--ir-sans); font-size: 12px; margin-left: 8px; }
 .ir-bar .ir-right { display: flex; gap: 6px; align-items: center; flex: none; }
 
-.ir-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.ir-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 /* 宿主在 macOS 上没有系统标题栏：带 data-window-drag 的元素才能拖动窗口（按钮等自动排除）。书架没有顶栏，留一条和宿主插件页同高的拖动带。 */
 .ir-dragband { flex: none; height: var(--dsh-frame-top-clearance, 0px); }
 .ir-empty { padding: 48px 24px; color: var(--ir-fg-2); text-align: center; }
@@ -301,6 +301,16 @@ var CSS = `
 }
 .ir-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); background: var(--ir-bg); border-left: 1px solid var(--ir-line); display: flex; flex-direction: column; z-index: 5; }
 .ir-drawer .ir-bar { padding: 8px 12px; }
+/* 过渡只有三处，都是 160ms：抽屉滑进滑出、换章淡入（正文让位的位移在 Reader 里用 transform 做） */
+.ir-drawer-in { animation: ir-drawer-in 160ms cubic-bezier(.2, 0, 0, 1); }
+.ir-drawer-out { animation: ir-drawer-out 160ms cubic-bezier(.4, 0, 1, 1) forwards; pointer-events: none; }
+@keyframes ir-drawer-in { from { transform: translateX(100%); } }
+@keyframes ir-drawer-out { to { transform: translateX(100%); } }
+.ir-page { animation: ir-fade 160ms ease-out; }
+@keyframes ir-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ir-drawer-in, .ir-drawer-out, .ir-page { animation: none; }
+}
 .ir-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 0 24px; }
 .ir-toc-item { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--ir-line); padding: 9px 16px; border-radius: 0; }
 .ir-toc-item:hover { background: var(--ir-bg-2); border-color: var(--ir-line); }
@@ -549,6 +559,32 @@ var DISPLAY_LABEL = { zh: "译文", bilingual: "双语", original: "原文" };
 var DISPLAY_ORDER = ["zh", "bilingual", "original"];
 var ASK_LABEL = { explain: "解释", intent: "这段在说什么", custom: "追问" };
 var ZH_PER_MINUTE = 400;
+var MOTION_MS = 160;
+var reduceMotion = () => Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+var glides = new WeakMap;
+function glideTo(root, el) {
+  cancelAnimationFrame(glides.get(root));
+  const max = root.scrollHeight - root.clientHeight;
+  const target = Math.max(0, Math.min(max, root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top));
+  if (reduceMotion()) {
+    root.scrollTop = target;
+    return;
+  }
+  const lead = root.clientHeight * 0.4;
+  let from = root.scrollTop;
+  if (Math.abs(target - from) > lead) {
+    from = target - Math.sign(target - from) * lead;
+    root.scrollTop = from;
+  }
+  const t0 = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / 240);
+    root.scrollTop = from + (target - from) * (1 - (1 - k) ** 3);
+    if (k < 1)
+      glides.set(root, requestAnimationFrame(step));
+  };
+  glides.set(root, requestAnimationFrame(step));
+}
 function tt(o, display) {
   return display !== "original" && o?.titleZh || o?.title || "";
 }
@@ -575,7 +611,27 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
   const [book, setBook] = import_react2.useState(null);
   const [chapter, setChapter] = import_react2.useState(null);
   const [error, setError] = import_react2.useState("");
-  const [drawer, setDrawer] = import_react2.useState("");
+  const [drawer, setDrawerState] = import_react2.useState("");
+  const drawerRef = import_react2.useRef("");
+  const flipFrom = import_react2.useRef(null);
+  const drawerEnter = import_react2.useRef(false);
+  const leaveTimer = import_react2.useRef(null);
+  const [drawerLeaving, setDrawerLeaving] = import_react2.useState("");
+  const setDrawer = import_react2.useCallback((v) => {
+    const prev = drawerRef.current;
+    if (v === prev)
+      return;
+    flipFrom.current = scrollRef.current?.querySelector(".ir-page")?.getBoundingClientRect().left ?? null;
+    drawerEnter.current = !prev;
+    clearTimeout(leaveTimer.current);
+    if (!v && prev && !reduceMotion()) {
+      setDrawerLeaving(prev);
+      leaveTimer.current = setTimeout(() => setDrawerLeaving(""), MOTION_MS);
+    } else
+      setDrawerLeaving("");
+    drawerRef.current = v;
+    setDrawerState(v);
+  }, []);
   const [status, setStatus] = import_react2.useState(null);
   const [session, setSession] = import_react2.useState(null);
   const [recalling, setRecalling] = import_react2.useState(false);
@@ -732,6 +788,25 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
       return;
     const r = el.getBoundingClientRect();
     root.scrollTop += r.top + a.frac * r.height - (root.getBoundingClientRect().top + 8);
+  }, [drawer]);
+  import_react2.useLayoutEffect(() => {
+    const from = flipFrom.current;
+    flipFrom.current = null;
+    const page = scrollRef.current?.querySelector(".ir-page");
+    if (from == null || !page || reduceMotion())
+      return;
+    const dx = from - page.getBoundingClientRect().left;
+    if (Math.abs(dx) < 1)
+      return;
+    page.style.transition = "none";
+    page.style.transform = `translateX(${dx}px)`;
+    page.getBoundingClientRect();
+    page.style.transition = `transform ${MOTION_MS}ms cubic-bezier(.2, 0, 0, 1)`;
+    page.style.transform = "";
+    const t = setTimeout(() => {
+      page.style.transition = "";
+    }, MOTION_MS + 40);
+    return () => clearTimeout(t);
   }, [drawer]);
   import_react2.useEffect(() => {
     const onKey = (e) => {
@@ -922,8 +997,8 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     try {
       if (chapter && chapter.id === cid && paraId) {
         const el = scrollRef.current?.querySelector(`[data-para="${paraId}"]`);
-        if (el) {
-          el.scrollIntoView({ block: "start" });
+        if (el && scrollRef.current) {
+          glideTo(scrollRef.current, el);
           return;
         }
       }
@@ -1034,6 +1109,7 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     ref: scrollRef,
     onScroll
   }, chapter ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    key: chapter.id,
     className: "ir-page",
     style: { fontSize: `${settings.fontSize || 18}px`, lineHeight: settings.lineHeight || 1.9 }
   }, /* @__PURE__ */ import_react2.default.createElement("h1", {
@@ -1100,9 +1176,10 @@ function Reader({ bookId, settings, onBack, onSettings, onDisplayChange }) {
     onClick: () => goChapter(chapter.next)
   }, tt(book?.chapters.find((c) => c.id === chapter.next), display) || "下一章", " ›"))) : /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-empty"
-  }, error ? "" : "打开中…")), drawer.startsWith("toc") && book ? /* @__PURE__ */ import_react2.default.createElement(TocDrawer, {
-    key: drawer,
-    initialTab: drawer === "toc:book" ? "book" : "toc",
+  }, error ? "" : "打开中…")), (drawer || drawerLeaving).startsWith("toc") && book ? /* @__PURE__ */ import_react2.default.createElement(TocDrawer, {
+    key: drawer || drawerLeaving,
+    motion: !drawer ? "out" : drawerEnter.current ? "in" : "",
+    initialTab: (drawer || drawerLeaving) === "toc:book" ? "book" : "toc",
     book,
     display,
     current: chapter?.id,
@@ -2250,16 +2327,17 @@ function AsksTab({ book, display, asks, onGo }) {
     }, head), String(a.answer ?? "").slice(0, 90), a.answer && a.answer.length > 90 ? "…" : ""));
   }));
 }
-function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, onClose, onGo, onBookChanged, onRetranslateChapter }) {
+function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, motion, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = import_react2.useState(initialTab || "toc");
   const [term, setTerm] = import_react2.useState("");
   const [zh, setZh] = import_react2.useState("");
   const [glossary, setGlossary] = import_react2.useState(book.glossary ?? []);
   const listRef = import_react2.useRef(null);
   import_react2.useEffect(() => {
-    const el = listRef.current?.querySelector(".ir-current");
+    const list = listRef.current;
+    const el = list?.querySelector(".ir-current");
     if (el)
-      el.scrollIntoView({ block: "center" });
+      list.scrollTop += el.getBoundingClientRect().top - list.getBoundingClientRect().top - (list.clientHeight - el.offsetHeight) / 2;
   }, []);
   const addTerm = async () => {
     if (!term.trim() || !zh.trim())
@@ -2278,7 +2356,7 @@ function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab,
     } catch {}
   };
   return /* @__PURE__ */ import_react2.default.createElement("div", {
-    className: "ir-drawer",
+    className: `ir-drawer${motion ? ` ir-drawer-${motion}` : ""}`,
     "data-window-drag-recall": ""
   }, /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-bar"

@@ -100,6 +100,7 @@ var api = {
   cancel: (id) => call("POST", `/books/${id}/cancel`, { json: {} }),
   status: (id) => call("GET", `/books/${id}/status`),
   glossary: (id, entry) => call("POST", `/books/${id}/glossary`, { json: entry }),
+  reviewGlossary: (id, offset, limit) => call("POST", `/books/${id}/glossary/review`, { json: { offset, limit } }),
   bookSettings: (id) => call("GET", `/books/${id}/settings`),
   saveBookSettings: (id, patch) => call("POST", `/books/${id}/settings`, { json: patch }),
   session: (id, extend) => call("GET", `/books/${id}/session${extend ? "?extend=1" : ""}`),
@@ -326,6 +327,13 @@ var CSS = `
 .ir-gloss { padding: 6px 16px; border-bottom: 1px solid var(--ir-line); display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
 .ir-gloss .ir-term { font-family: "Georgia", serif; color: var(--ir-fg-2); flex: 1; }
 .ir-gloss .ir-zh-term { font-family: var(--ir-serif); }
+.ir-gloss-mine { margin-left: 6px; font-size: 11px; color: var(--ir-fg-3); font-family: var(--ir-sans); }
+.ir-gloss-review { display: flex; gap: 12px; align-items: baseline; white-space: normal; }
+.ir-gloss-review > span:first-child { flex: 1; }
+.ir-gloss-review-actions { display: flex; gap: 12px; flex: none; }
+.ir-gloss-review-box { border-bottom: 1px solid var(--ir-fg-3); max-height: 50vh; overflow-y: auto; }
+.ir-gloss-pick { cursor: pointer; }
+.ir-gloss-pick input { flex: none; margin: 0; align-self: center; }
 .ir-block { padding: 10px 16px; white-space: pre-wrap; font-size: 14px; line-height: 1.75; color: var(--ir-fg-2); border-bottom: 1px solid var(--ir-line); }
 
 /* 设置 */
@@ -2327,6 +2335,91 @@ function AsksTab({ book, display, asks, onGo }) {
     }, head), String(a.answer ?? "").slice(0, 90), a.answer && a.answer.length > 90 ? "…" : ""));
   }));
 }
+function GlossaryReview({ bookId, total, onRemoved }) {
+  const CHUNK = 60;
+  const [state, setState] = import_react2.useState(null);
+  const stopRef = import_react2.useRef(false);
+  import_react2.useEffect(() => () => {
+    stopRef.current = true;
+  }, []);
+  const run = async () => {
+    stopRef.current = false;
+    setState({ running: true, seen: 0, total, failed: 0, drop: [], keep: new Set });
+    const once = async (offset) => {
+      for (let attempt = 0;attempt < 2; attempt++) {
+        try {
+          return await api.reviewGlossary(bookId, offset, CHUNK);
+        } catch {}
+      }
+      return null;
+    };
+    const take = (r) => setState((prev) => prev && { ...prev, seen: Math.min(total, prev.seen + CHUNK), failed: prev.failed + (r ? 0 : 1), drop: r ? [...prev.drop, ...r.drop] : prev.drop });
+    const offsets = [];
+    for (let o = 0;o < total; o += CHUNK)
+      offsets.push(o);
+    await Promise.all(Array.from({ length: 6 }, async () => {
+      while (offsets.length && !stopRef.current) {
+        const r = await once(offsets.shift());
+        if (!stopRef.current)
+          take(r);
+      }
+    }));
+    if (!stopRef.current)
+      setState((prev) => prev && { ...prev, running: false });
+  };
+  const stop = () => {
+    stopRef.current = true;
+    setState((prev) => prev && { ...prev, running: false });
+  };
+  const toggle = (term) => setState((prev) => {
+    const keep = new Set(prev.keep);
+    keep.has(term) ? keep.delete(term) : keep.add(term);
+    return { ...prev, keep };
+  });
+  const remove = async () => {
+    const terms = state.drop.map((g) => g.term).filter((t) => !state.keep.has(t));
+    try {
+      onRemoved(await api.glossary(bookId, { remove: terms }));
+      setState(null);
+    } catch {}
+  };
+  if (!state) {
+    return /* @__PURE__ */ import_react2.default.createElement("div", {
+      className: "ir-block ir-gloss-review"
+    }, /* @__PURE__ */ import_react2.default.createElement("span", null, "模型翻译时会把一些普通词也收进术语表，之后每次都照搬，译文容易僵。可以让模型挑出这些条目，你确认后再删。"), /* @__PURE__ */ import_react2.default.createElement("button", {
+      className: "ir-link",
+      onClick: run
+    }, "整理术语表"));
+  }
+  const chosen = state.drop.filter((g) => !state.keep.has(g.term)).length;
+  return /* @__PURE__ */ import_react2.default.createElement("div", null, /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-block ir-gloss-review"
+  }, state.running ? /* @__PURE__ */ import_react2.default.createElement("span", null, "正在整理：已看 ", state.seen, " / ", state.total, " 条，挑出 ", state.drop.length, " 条") : /* @__PURE__ */ import_react2.default.createElement("span", null, "建议删除 ", state.drop.length, " 条（普通词或译错的）", state.failed ? `，有 ${state.failed} 块没整理成` : "", "。取消勾选的会保留。"), state.running ? /* @__PURE__ */ import_react2.default.createElement("button", {
+    className: "ir-link",
+    onClick: stop
+  }, "停止") : /* @__PURE__ */ import_react2.default.createElement("span", {
+    className: "ir-gloss-review-actions"
+  }, chosen ? /* @__PURE__ */ import_react2.default.createElement("button", {
+    className: "ir-link",
+    onClick: remove
+  }, "删除选中的 ", chosen, " 条") : null, /* @__PURE__ */ import_react2.default.createElement("button", {
+    className: "ir-link",
+    onClick: () => setState(null)
+  }, state.drop.length ? "全部保留" : "关闭"))), state.drop.length ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    className: "ir-gloss-review-box"
+  }, state.drop.map((g) => /* @__PURE__ */ import_react2.default.createElement("label", {
+    className: "ir-gloss ir-gloss-pick",
+    key: g.term
+  }, /* @__PURE__ */ import_react2.default.createElement("input", {
+    type: "checkbox",
+    checked: !state.keep.has(g.term),
+    onChange: () => toggle(g.term)
+  }), /* @__PURE__ */ import_react2.default.createElement("span", {
+    className: "ir-term"
+  }, g.term), /* @__PURE__ */ import_react2.default.createElement("span", {
+    className: "ir-zh-term"
+  }, g.zh)))) : null);
+}
 function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, motion, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = import_react2.useState(initialTab || "toc");
   const [term, setTerm] = import_react2.useState("");
@@ -2339,6 +2432,10 @@ function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab,
     if (el)
       list.scrollTop += el.getBoundingClientRect().top - list.getBoundingClientRect().top - (list.clientHeight - el.offsetHeight) / 2;
   }, []);
+  import_react2.useEffect(() => {
+    if (tab !== "toc" && listRef.current)
+      listRef.current.scrollTop = 0;
+  }, [tab]);
   const addTerm = async () => {
     if (!term.trim() || !zh.trim())
       return;
@@ -2460,12 +2557,24 @@ function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab,
     onClick: addTerm
   }, "固定")), glossary.length === 0 ? /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-block"
-  }, "还没有术语。模型翻译时会自动提议，你也可以在这里固定译法。") : null, glossary.map((g) => /* @__PURE__ */ import_react2.default.createElement("div", {
+  }, "还没有术语。模型翻译时会自动提议，你也可以在这里固定译法。") : null) : null, glossary.length > 0 ? /* @__PURE__ */ import_react2.default.createElement("div", {
+    hidden: tab !== "glossary"
+  }, /* @__PURE__ */ import_react2.default.createElement(GlossaryReview, {
+    bookId: book.id,
+    total: glossary.filter((g) => g.by !== "reader").length,
+    onRemoved: (next) => {
+      setGlossary(next);
+      onBookChanged();
+    }
+  })) : null, tab === "glossary" ? /* @__PURE__ */ import_react2.default.createElement("div", null, glossary.map((g) => /* @__PURE__ */ import_react2.default.createElement("div", {
     className: "ir-gloss",
     key: g.term
   }, /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-term"
-  }, g.term), /* @__PURE__ */ import_react2.default.createElement("span", {
+  }, g.term, g.by === "reader" ? /* @__PURE__ */ import_react2.default.createElement("small", {
+    className: "ir-gloss-mine",
+    title: "你固定的译法：模型不会改它，整理时也不会动它"
+  }, "手定") : null), /* @__PURE__ */ import_react2.default.createElement("span", {
     className: "ir-zh-term"
   }, g.zh), /* @__PURE__ */ import_react2.default.createElement("button", {
     className: "ir-plain",

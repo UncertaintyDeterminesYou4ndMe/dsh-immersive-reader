@@ -209,6 +209,13 @@ export const CSS = `
 .ir-gloss { padding: 6px 16px; border-bottom: 1px solid var(--ir-line); display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
 .ir-gloss .ir-term { font-family: "Georgia", serif; color: var(--ir-fg-2); flex: 1; }
 .ir-gloss .ir-zh-term { font-family: var(--ir-serif); }
+.ir-gloss-mine { margin-left: 6px; font-size: 11px; color: var(--ir-fg-3); font-family: var(--ir-sans); }
+.ir-gloss-review { display: flex; gap: 12px; align-items: baseline; white-space: normal; }
+.ir-gloss-review > span:first-child { flex: 1; }
+.ir-gloss-review-actions { display: flex; gap: 12px; flex: none; }
+.ir-gloss-review-box { border-bottom: 1px solid var(--ir-fg-3); max-height: 50vh; overflow-y: auto; }
+.ir-gloss-pick { cursor: pointer; }
+.ir-gloss-pick input { flex: none; margin: 0; align-self: center; }
 .ir-block { padding: 10px 16px; white-space: pre-wrap; font-size: 14px; line-height: 1.75; color: var(--ir-fg-2); border-bottom: 1px solid var(--ir-line); }
 
 /* 设置 */

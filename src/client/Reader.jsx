@@ -1152,6 +1152,77 @@ function AsksTab({ book, display, asks, onGo }) {
   )
 }
 
+/**
+ * 整理术语表：模型翻译时会把普通词（sophistication、high wages……）也收进术语表，
+ * 之后每批都被强制沿用，译文就僵了。这里让模型逐块挑出该删的，读者勾选确认后才删。
+ * 分块从客户端发，避免一个请求跑几分钟；你固定的条目不参与。
+ */
+function GlossaryReview({ bookId, total, onRemoved }) {
+  const CHUNK = 60
+  const [state, setState] = useState(null) // null | { running, seen, total, failed, drop: [], keep: Set }
+  const stopRef = useRef(false)
+  useEffect(() => () => { stopRef.current = true }, [])
+  const run = async () => {
+    stopRef.current = false
+    setState({ running: true, seen: 0, total, failed: 0, drop: [], keep: new Set() })
+    const once = async (offset) => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try { return await api.reviewGlossary(bookId, offset, CHUNK) } catch { /* 再试一次 */ }
+      }
+      return null
+    }
+    const take = (r) => setState(prev => prev && ({ ...prev, seen: Math.min(total, prev.seen + CHUNK), failed: prev.failed + (r ? 0 : 1), drop: r ? [...prev.drop, ...r.drop] : prev.drop }))
+    // 总数客户端已知（术语表里不是读者固定的那些），一开始就并发发出去
+    const offsets = []
+    for (let o = 0; o < total; o += CHUNK) offsets.push(o)
+    await Promise.all(Array.from({ length: 6 }, async () => {
+      while (offsets.length && !stopRef.current) { const r = await once(offsets.shift()); if (!stopRef.current) take(r) }
+    }))
+    if (!stopRef.current) setState(prev => prev && ({ ...prev, running: false }))
+  }
+  const stop = () => { stopRef.current = true; setState(prev => prev && ({ ...prev, running: false })) }
+  const toggle = (term) => setState(prev => { const keep = new Set(prev.keep); keep.has(term) ? keep.delete(term) : keep.add(term); return { ...prev, keep } })
+  const remove = async () => {
+    const terms = state.drop.map(g => g.term).filter(t => !state.keep.has(t))
+    try { onRemoved(await api.glossary(bookId, { remove: terms })); setState(null) } catch { /* 留着让读者再点 */ }
+  }
+  if (!state) {
+    return (
+      <div className="ir-block ir-gloss-review">
+        <span>模型翻译时会把一些普通词也收进术语表，之后每次都照搬，译文容易僵。可以让模型挑出这些条目，你确认后再删。</span>
+        <button className="ir-link" onClick={run}>整理术语表</button>
+      </div>
+    )
+  }
+  const chosen = state.drop.filter(g => !state.keep.has(g.term)).length
+  return (
+    <div>
+      <div className="ir-block ir-gloss-review">
+        {state.running
+          ? <span>正在整理：已看 {state.seen} / {state.total} 条，挑出 {state.drop.length} 条</span>
+          : <span>建议删除 {state.drop.length} 条（普通词或译错的）{state.failed ? `，有 ${state.failed} 块没整理成` : ''}。取消勾选的会保留。</span>}
+        {state.running
+          ? <button className="ir-link" onClick={stop}>停止</button>
+          : <span className="ir-gloss-review-actions">
+              {chosen ? <button className="ir-link" onClick={remove}>删除选中的 {chosen} 条</button> : null}
+              <button className="ir-link" onClick={() => setState(null)}>{state.drop.length ? '全部保留' : '关闭'}</button>
+            </span>}
+      </div>
+      {state.drop.length ? (
+        <div className="ir-gloss-review-box">
+          {state.drop.map(g => (
+            <label className="ir-gloss ir-gloss-pick" key={g.term}>
+              <input type="checkbox" checked={!state.keep.has(g.term)} onChange={() => toggle(g.term)} />
+              <span className="ir-term">{g.term}</span>
+              <span className="ir-zh-term">{g.zh}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab, motion, onClose, onGo, onBookChanged, onRetranslateChapter }) {
   const [tab, setTab] = useState(initialTab || 'toc')
   const [term, setTerm] = useState('')
@@ -1164,6 +1235,7 @@ function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab,
     const el = list?.querySelector('.ir-current')
     if (el) list.scrollTop += el.getBoundingClientRect().top - list.getBoundingClientRect().top - (list.clientHeight - el.offsetHeight) / 2
   }, [])
+  useEffect(() => { if (tab !== 'toc' && listRef.current) listRef.current.scrollTop = 0 }, [tab])
   const addTerm = async () => {
     if (!term.trim() || !zh.trim()) return
     try { setGlossary(await api.glossary(book.id, { term: term.trim(), zh: zh.trim() })); setTerm(''); setZh(''); onBookChanged() } catch { /* 忽略 */ }
@@ -1216,9 +1288,15 @@ function TocDrawer({ book, display, current, marks, asks, liveReach, initialTab,
               <button onClick={addTerm}>固定</button>
             </div>
             {glossary.length === 0 ? <div className="ir-block">还没有术语。模型翻译时会自动提议，你也可以在这里固定译法。</div> : null}
+          </div>
+        ) : null}
+        {/* 整理组件常驻、切走页签只隐藏：整理要跑几分钟，别因为看了眼目录就停掉。术语列表本身仍只在这个页签渲染 */}
+        {glossary.length > 0 ? <div hidden={tab !== 'glossary'}><GlossaryReview bookId={book.id} total={glossary.filter(g => g.by !== 'reader').length} onRemoved={next => { setGlossary(next); onBookChanged() }} /></div> : null}
+        {tab === 'glossary' ? (
+          <div>
             {glossary.map(g => (
               <div className="ir-gloss" key={g.term}>
-                <span className="ir-term">{g.term}</span>
+                <span className="ir-term">{g.term}{g.by === 'reader' ? <small className="ir-gloss-mine" title="你固定的译法：模型不会改它，整理时也不会动它">手定</small> : null}</span>
                 <span className="ir-zh-term">{g.zh}</span>
                 <button className="ir-plain" onClick={() => removeTerm(g.term)}>删</button>
               </div>

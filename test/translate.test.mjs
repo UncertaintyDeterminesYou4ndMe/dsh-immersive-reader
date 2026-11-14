@@ -220,6 +220,21 @@ test('recallBook：用章导读与各份回想拼提示，结果落在 trans.boo
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
+test('模型提议的术语不覆盖术语表里已有的译法', async () => {
+  const { store, dir } = await tempStore()
+  try {
+    const book = await store.addBook(new Uint8Array([1, 2, 3]), { filename: 'a.txt', doc: BOOK })
+    await store.mergeTranslations(book.id, { glossary: [{ term: 'alpha', zh: '甲' }] })
+    const translator = new Translator({ ctx: fakeCtx([]), store, logger: { info() {}, warn() {} } })
+    const settings = await store.settings()
+    await translator.ensureLookahead(book.id, { chapterId: 'c1', paraId: 'c1p1' }, { ...settings, lookahead: { unit: 'chapters', count: 0 } })
+    await waitIdle(translator, book.id)
+    const trans = await store.translations(book.id)
+    assert.ok(trans.paragraphs.c1p1.zh)
+    assert.deepEqual(trans.glossary, [{ term: 'alpha', zh: '甲' }])
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('isFrontMatter / firstContentChapter：跳过封面版权目录', async () => {
   const { isFrontMatter, firstContentChapter } = await import('../lib/translate.js')
   assert.ok(isFrontMatter('Cover') && isFrontMatter('Title Page') && isFrontMatter('CONTENTS') && isFrontMatter('目录') && isFrontMatter('第 3 节'))

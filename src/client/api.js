@@ -38,6 +38,7 @@ export const api = {
   cancel: (id) => call('POST', `/books/${id}/cancel`, { json: {} }),
   status: (id) => call('GET', `/books/${id}/status`),
   glossary: (id, entry) => call('POST', `/books/${id}/glossary`, { json: entry }),
+  reviewGlossary: (id, offset, limit) => call('POST', `/books/${id}/glossary/review`, { json: { offset, limit } }),
   bookSettings: (id) => call('GET', `/books/${id}/settings`),
   saveBookSettings: (id, patch) => call('POST', `/books/${id}/settings`, { json: patch }),
   session: (id, extend) => call('GET', `/books/${id}/session${extend ? '?extend=1' : ''}`),
